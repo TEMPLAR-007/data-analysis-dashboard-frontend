@@ -26,7 +26,8 @@ function App() {
   }, [])
 
   const handleQuerySaved = (queryId) => {
-    if (queryId) {
+    // Only switch to analysis view if it's explicitly an analysis result
+    if (queryId && queryId.type === 'analysis') {
       setActiveView('analysis')
     }
   }

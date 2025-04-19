@@ -119,8 +119,12 @@ export const api = {
             const response = await fetch(`${API_BASE_URL}/query/schema/${tableName}`);
             return await response.json();
         } catch (error) {
-            console.error(`Error fetching schema for ${tableName}:`, error);
-            throw error;
+            console.error(`Error fetching schema for table ${tableName}:`, error);
+            return {
+                success: false,
+                message: `Failed to get schema for table: ${tableName}`,
+                error: error.message
+            };
         }
     },
 
@@ -275,35 +279,33 @@ export const api = {
     },
 
     // Table Management endpoints
-    async getAllTables() {
+    async getTables() {
         try {
-            const response = await fetch(`${API_BASE_URL}/tables`);
+            const response = await fetch(`${API_BASE_URL}/upload/tables`);
             return await response.json();
         } catch (error) {
             console.error('Error fetching tables:', error);
-            throw error;
-        }
-    },
-
-    async getTableDetails(tableName) {
-        try {
-            const response = await fetch(`${API_BASE_URL}/tables/${tableName}`);
-            return await response.json();
-        } catch (error) {
-            console.error(`Error fetching table details for ${tableName}:`, error);
-            throw error;
+            return {
+                success: false,
+                message: 'Failed to get tables',
+                error: error.message
+            };
         }
     },
 
     async deleteTable(tableName) {
         try {
-            const response = await fetch(`${API_BASE_URL}/tables/${tableName}`, {
+            const response = await fetch(`${API_BASE_URL}/upload/table/${tableName}`, {
                 method: 'DELETE',
             });
             return await response.json();
         } catch (error) {
             console.error(`Error deleting table ${tableName}:`, error);
-            throw error;
+            return {
+                success: false,
+                message: `Failed to delete table: ${tableName}`,
+                error: error.message
+            };
         }
     },
 

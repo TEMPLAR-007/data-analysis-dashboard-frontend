@@ -154,7 +154,8 @@ const QueryForm = ({ onQuerySaved }) => {
                 // Refresh all queries instead of just adding one
                 setUserQuery('');
                 fetchSavedQueries();
-                if (onQuerySaved) onQuerySaved(result.query_id);
+                // Only call onQuerySaved for analysis, not for regular queries
+                // if (onQuerySaved) onQuerySaved(result.query_id);
             } else {
                 setError(result.message || 'Failed to process query');
             }
@@ -1035,18 +1036,23 @@ const QueryForm = ({ onQuerySaved }) => {
                                                 />
                                                 <h3 style={{
                                                     color: '#1a73e8',
-                                                    fontSize: '1rem',
+                                                    fontSize: '0.85rem',
                                                     fontWeight: 'bold',
                                                     margin: '0',
                                                     padding: '0.25rem 0',
                                                     whiteSpace: 'nowrap',
                                                     overflow: 'hidden',
-                                                    textOverflow: 'ellipsis'
+                                                    textOverflow: 'ellipsis',
+                                                    maxWidth: '250px'
                                                 }}>
                                                     Query: {queryText ? `"${queryText}"` : "No query text available"}
                                                 </h3>
                                             </div>
-                                            <div className="result-actions">
+                                            <div className="result-actions" style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '0.5rem'
+                                            }}>
                                                 {isChartable(query.filtered_data) && (
                                                     <select
                                                         value={query.preferredChartType || (query.chart_data ? query.chart_data.type : 'bar')}
@@ -1062,7 +1068,19 @@ const QueryForm = ({ onQuerySaved }) => {
                                                 <button
                                                     className="close-result"
                                                     onClick={() => setPendingDeleteIndex(index)}
-                                                    style={{ fontSize: '1rem', padding: '0 0.25rem' }}
+                                                    style={{
+                                                        fontSize: '1rem',
+                                                        padding: '0 0.25rem',
+                                                        display: 'block',
+                                                        marginLeft: '0.5rem',
+                                                        backgroundColor: '#f5f5f5',
+                                                        border: '1px solid #ddd',
+                                                        borderRadius: '4px',
+                                                        width: '24px',
+                                                        height: '24px',
+                                                        lineHeight: '1',
+                                                        cursor: 'pointer'
+                                                    }}
                                                 >
                                                     &times;
                                                 </button>
