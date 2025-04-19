@@ -3,18 +3,33 @@ import api from '../utils/api';
 
 const FileUpload = ({ onFileUploaded }) => {
     const [file, setFile] = useState(null);
-    const [tableName, setTableName] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
     const [success, setSuccess] = useState(null);
+    const [isDragging, setIsDragging] = useState(false);
 
     const handleFileChange = (e) => {
         const selectedFile = e.target.files[0];
         if (selectedFile) {
             setFile(selectedFile);
-            // Generate a table name suggestion based on the file name
-            const fileNameWithoutExtension = selectedFile.name.split('.')[0];
-            setTableName(fileNameWithoutExtension.toLowerCase().replace(/\s+/g, '_'));
+        }
+    };
+
+    const handleDragOver = (e) => {
+        e.preventDefault();
+        setIsDragging(true);
+    };
+
+    const handleDragLeave = () => {
+        setIsDragging(false);
+    };
+
+    const handleDrop = (e) => {
+        e.preventDefault();
+        setIsDragging(false);
+
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            setFile(e.dataTransfer.files[0]);
         }
     };
 
@@ -26,22 +41,16 @@ const FileUpload = ({ onFileUploaded }) => {
             return;
         }
 
-        if (!tableName) {
-            setError('Please provide a table name');
-            return;
-        }
-
         setIsLoading(true);
         setError(null);
         setSuccess(null);
 
         try {
-            const result = await api.uploadFile(file, tableName);
+            const result = await api.uploadFile(file);
 
             if (result.success) {
-                setSuccess(`File successfully uploaded as table '${tableName}'`);
+                setSuccess(`File successfully uploaded as table '${result.table || file.name.split('.')[0]}'`);
                 setFile(null);
-                setTableName('');
 
                 if (onFileUploaded) {
                     onFileUploaded(result);
@@ -100,32 +109,56 @@ const FileUpload = ({ onFileUploaded }) => {
             )}
 
             <form onSubmit={handleSubmit}>
-                <div style={{ marginBottom: '1rem' }}>
-                    <label
-                        htmlFor="file-upload"
-                        style={{
-                            display: 'block',
-                            marginBottom: '0.5rem',
-                            color: '#202124',
-                            fontSize: '0.9rem'
-                        }}
-                    >
-                        Select File (CSV or Excel)
-                    </label>
-                    <input
-                        id="file-upload"
-                        type="file"
-                        accept=".csv,.xlsx,.xls"
-                        onChange={handleFileChange}
-                        style={{
-                            display: 'block',
-                            width: '100%',
-                            padding: '0.5rem',
-                            border: '1px solid #dadce0',
-                            borderRadius: '4px',
-                            backgroundColor: '#f8faff'
-                        }}
-                    />
+                <div
+                    style={{
+                        marginBottom: '1.5rem',
+                        border: `2px dashed ${isDragging ? '#1a73e8' : '#dadce0'}`,
+                        borderRadius: '8px',
+                        padding: '2rem',
+                        textAlign: 'center',
+                        backgroundColor: isDragging ? '#f8faff' : '#f8f9fa',
+                        transition: 'all 0.2s ease'
+                    }}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                >
+                    <div style={{ marginBottom: '1rem' }}>
+                        <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>
+                            📄
+                        </div>
+                        <div style={{
+                            fontSize: '1rem',
+                            color: '#5f6368',
+                            marginBottom: '1rem'
+                        }}>
+                            {file ? `Selected: ${file.name}` : 'Drag & drop a file here or click to browse'}
+                        </div>
+
+                        <input
+                            id="file-upload"
+                            type="file"
+                            accept=".csv,.xlsx,.xls"
+                            onChange={handleFileChange}
+                            style={{
+                                display: 'none'
+                            }}
+                        />
+                        <label
+                            htmlFor="file-upload"
+                            style={{
+                                backgroundColor: '#e8f0fe',
+                                color: '#1967d2',
+                                padding: '0.5rem 1rem',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                display: 'inline-block'
+                            }}
+                        >
+                            Browse Files
+                        </label>
+                    </div>
+
                     <div style={{
                         marginTop: '0.25rem',
                         fontSize: '0.8rem',
@@ -135,48 +168,19 @@ const FileUpload = ({ onFileUploaded }) => {
                     </div>
                 </div>
 
-                <div style={{ marginBottom: '1.5rem' }}>
-                    <label
-                        htmlFor="table-name"
-                        style={{
-                            display: 'block',
-                            marginBottom: '0.5rem',
-                            color: '#202124',
-                            fontSize: '0.9rem'
-                        }}
-                    >
-                        Table Name
-                    </label>
-                    <input
-                        id="table-name"
-                        type="text"
-                        value={tableName}
-                        onChange={(e) => setTableName(e.target.value)}
-                        placeholder="Enter table name (e.g., sales_data)"
-                        style={{
-                            display: 'block',
-                            width: '100%',
-                            padding: '0.75rem',
-                            border: '1px solid #dadce0',
-                            borderRadius: '4px',
-                            fontSize: '1rem'
-                        }}
-                        required
-                    />
-                </div>
-
                 <button
                     type="submit"
-                    disabled={isLoading}
+                    disabled={isLoading || !file}
                     style={{
-                        backgroundColor: '#1a73e8',
+                        backgroundColor: file ? '#1a73e8' : '#dadce0',
                         color: 'white',
                         border: 'none',
                         borderRadius: '4px',
                         padding: '0.75rem 1.5rem',
                         fontSize: '1rem',
-                        cursor: isLoading ? 'wait' : 'pointer',
-                        opacity: isLoading ? 0.7 : 1
+                        cursor: file && !isLoading ? 'pointer' : 'not-allowed',
+                        opacity: isLoading ? 0.7 : 1,
+                        width: '100%'
                     }}
                 >
                     {isLoading ? 'Uploading...' : 'Upload File'}

@@ -6,22 +6,21 @@ export const api = {
 
     // File Upload endpoints
     async uploadFile(file, tableName) {
-        if (!file || !tableName) {
-            console.error('Missing required fields for file upload');
+        if (!file) {
+            console.error('Missing required file for upload');
             return {
                 success: false,
-                message: 'Missing required fields: file or tableName'
+                message: 'Missing required file'
             };
         }
 
         try {
-            console.log(`Uploading file ${file.name} as table ${tableName}`);
+            console.log(`Uploading file ${file.name}`);
 
             const formData = new FormData();
             formData.append('file', file);
-            formData.append('tableName', tableName);
 
-            const response = await fetch(`${API_BASE_URL}/upload`, {
+            const response = await fetch(`${API_BASE_URL}/upload/file`, {
                 method: 'POST',
                 body: formData,
             });
@@ -47,7 +46,7 @@ export const api = {
 
             return {
                 success: true,
-                table: tableName,
+                table: result.table || tableName,
                 message: result.message || 'File uploaded successfully',
                 ...result
             };
