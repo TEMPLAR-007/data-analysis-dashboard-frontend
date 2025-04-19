@@ -4,6 +4,62 @@ const API_BASE_URL = 'http://localhost:3000/api';
 export const api = {
     BASE_URL: API_BASE_URL,
 
+    // File Upload endpoints
+    async uploadFile(file, tableName) {
+        if (!file || !tableName) {
+            console.error('Missing required fields for file upload');
+            return {
+                success: false,
+                message: 'Missing required fields: file or tableName'
+            };
+        }
+
+        try {
+            console.log(`Uploading file ${file.name} as table ${tableName}`);
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('tableName', tableName);
+
+            const response = await fetch(`${API_BASE_URL}/upload`, {
+                method: 'POST',
+                body: formData,
+            });
+
+            let result;
+            try {
+                result = await response.json();
+            } catch (parseError) {
+                console.error('Failed to parse response as JSON:', parseError);
+                return {
+                    success: false,
+                    message: 'Server returned invalid response format'
+                };
+            }
+
+            if (!response.ok) {
+                console.error('Server error:', response.status, result);
+                return {
+                    success: false,
+                    message: result.message || `Server error: ${response.status}`
+                };
+            }
+
+            return {
+                success: true,
+                table: tableName,
+                message: result.message || 'File uploaded successfully',
+                ...result
+            };
+        } catch (error) {
+            console.error('Error uploading file:', error);
+            return {
+                success: false,
+                message: error.message || 'Failed to upload file'
+            };
+        }
+    },
+
     // Query endpoints
     async processQuery(queryData) {
         try {

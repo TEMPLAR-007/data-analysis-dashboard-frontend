@@ -392,6 +392,17 @@ button:disabled {
   color: var(--error-color);
 }
 
+.api-status.success {
+  background-color: #d4edda;
+  color: #155724;
+  border-color: #c3e6cb;
+  padding: 0.75rem 1.25rem;
+  margin-bottom: 1rem;
+  border-radius: 0.25rem;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
