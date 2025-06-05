@@ -1,5 +1,7 @@
+import React from 'react';
+import Chart from 'chart.js/auto';
 import { useState, useEffect } from 'react';
-import api from '../utils/api';
+import { api } from '../utils/api';
 
 const AnalysisHistory = ({ onStartAnalysis }) => {
     const [history, setHistory] = useState([]);
@@ -85,44 +87,19 @@ const AnalysisHistory = ({ onStartAnalysis }) => {
             if (currentAnalysis && !currentAnalysis.results) {
                 try {
                     console.log(`Fetching details for analysis ${analysisId}`);
-                    const response = await fetch(`${api.BASE_URL}/analyze/history/${analysisId}`);
-                    const detailedResult = await response.json();
+                    const response = await api.getAnalysisDetails(analysisId);
+                    console.log('Detailed result:', response);
 
-                    console.log('Detailed result:', detailedResult);
-
-                    if (detailedResult && detailedResult.success) {
-                        // Extract the results based on the response format
-                        let resultsData;
-
-                        if (detailedResult.dashboard) {
-                            // If response has dashboard structure
-                            resultsData = {
-                                ...detailedResult.dashboard.insights,
-                                visualization: detailedResult.dashboard.visualization,
-                                metadata: detailedResult.dashboard.metadata
-                            };
-                        } else if (detailedResult.analysis && detailedResult.analysis.results) {
-                            // If response has analysis.results structure
-                            resultsData = detailedResult.analysis.results;
-                        } else if (detailedResult.results) {
-                            // If response has a direct results property
-                            resultsData = detailedResult.results;
-                        } else {
-                            // Fallback if no recognizable structure
-                            resultsData = { error: 'Unrecognized result format' };
-                        }
-
-                        console.log('Processed results data:', resultsData);
-
+                    if (response.success) {
                         // Update the history item with the results
                         setHistory(prevHistory => prevHistory.map(item =>
                             item.id === analysisId ? {
                                 ...item,
-                                results: resultsData
+                                results: response.results
                             } : item
                         ));
                     } else {
-                        throw new Error(detailedResult.message || 'Failed to fetch analysis details');
+                        throw new Error(response.message || 'Failed to fetch analysis details');
                     }
                 } catch (err) {
                     console.error(`Error fetching details for analysis ${analysisId}:`, err);
@@ -144,11 +121,7 @@ const AnalysisHistory = ({ onStartAnalysis }) => {
 
         try {
             console.log(`Deleting analysis with ID: ${analysisId}`);
-            const response = await fetch(`${api.BASE_URL}/analyze/${analysisId}`, {
-                method: 'DELETE',
-            });
-
-            const result = await response.json();
+            const result = await api.deleteAnalysis(analysisId);
             console.log('Delete result:', result);
 
             if (result.success) {
@@ -178,13 +151,29 @@ const AnalysisHistory = ({ onStartAnalysis }) => {
 
         let items = [];
         if (Array.isArray(data)) {
-            items = data;
-        } else if (typeof data === 'object') {
-            items = Object.values(data);
+            items = data.map(item => {
+                if (typeof item === 'object' && item !== null) {
+                    // Handle objects by extracting relevant text
+                    return item.description || item.title || item.text ||
+                        (item.source && item.description ? `${item.source}: ${item.description}` :
+                            JSON.stringify(item));
+                }
+                return String(item);
+            });
+        } else if (typeof data === 'object' && data !== null) {
+            items = Object.values(data).map(item => {
+                if (typeof item === 'object' && item !== null) {
+                    // Handle nested objects
+                    return item.description || item.title || item.text ||
+                        (item.source && item.description ? `${item.source}: ${item.description}` :
+                            JSON.stringify(item));
+                }
+                return String(item);
+            });
         } else if (typeof data === 'string') {
             items = [data];
         } else {
-            return null;
+            items = [String(data)];
         }
 
         if (items.length === 0) return null;
@@ -199,9 +188,7 @@ const AnalysisHistory = ({ onStartAnalysis }) => {
                 }}>
                     {items.map((item, index) => (
                         <li key={index} style={{ marginBottom: '0.5rem' }}>
-                            {typeof item === 'object'
-                                ? (item.description || item.title || JSON.stringify(item))
-                                : String(item)}
+                            {item}
                         </li>
                     ))}
                 </ul>
@@ -209,59 +196,202 @@ const AnalysisHistory = ({ onStartAnalysis }) => {
         );
     };
 
-    // Revise the placeholder chart rendering to match the screenshot style
-    const renderPlaceholderChart = (type, title, dataPoints) => {
-        const isMetric = type.toLowerCase() === 'metrics' || type.toLowerCase() === 'metric';
+    const renderMetricItem = (item) => {
+        if (!item || !item.value) return null;
+
+        const trendColor = item.trend > 0 ? '#10b981' : item.trend < 0 ? '#ef4444' : '#6b7280';
+        const trendIcon = item.trend > 0 ? '↑' : item.trend < 0 ? '↓' : '→';
+
+        return (
+            <div key={item.label} style={{
+                marginBottom: '1rem',
+                padding: '0.75rem',
+                backgroundColor: 'white',
+                borderRadius: '6px',
+                boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)'
+            }}>
+                <div style={{
+                    fontSize: '0.875rem',
+                    color: '#6b7280',
+                    marginBottom: '0.25rem'
+                }}>
+                    {item.label}
+                </div>
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    gap: '0.5rem'
+                }}>
+                    <span style={{
+                        fontSize: '1.25rem',
+                        fontWeight: '600',
+                        color: '#111827'
+                    }}>
+                        {typeof item.value === 'number' ?
+                            new Intl.NumberFormat('en-US', {
+                                style: item.format === 'currency' ? 'currency' : 'decimal',
+                                currency: 'USD',
+                                minimumFractionDigits: 0,
+                                maximumFractionDigits: 2
+                            }).format(item.value)
+                            : item.value}
+                    </span>
+                    {item.trend !== undefined && (
+                        <span style={{
+                            fontSize: '0.875rem',
+                            color: trendColor,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem'
+                        }}>
+                            {trendIcon}
+                            {Math.abs(item.trend)}%
+                        </span>
+                    )}
+                </div>
+                {item.context && (
+                    <div style={{
+                        fontSize: '0.75rem',
+                        color: '#6b7280',
+                        marginTop: '0.25rem'
+                    }}>
+                        {item.context}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    const ChartComponent = ({ title, data, context }) => {
+        const chartRef = React.useRef(null);
+        const chartInstance = React.useRef(null);
+        const dataRef = React.useRef(null);
+
+        // Memoize the chart configuration to prevent unnecessary re-renders
+        const chartConfig = React.useMemo(() => ({
+            type: 'bar',
+            data: {
+                labels: data?.labels?.map(label => String(label)) || [],
+                datasets: [{
+                    data: data?.values?.map(value => Number(value) || 0) || [],
+                    backgroundColor: '#1a73e8',
+                    borderColor: '#1557b0',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: (context) => {
+                                let value = context.raw;
+                                return new Intl.NumberFormat('en-US', {
+                                    style: data?.format === 'currency' ? 'currency' : 'decimal',
+                                    currency: 'USD',
+                                    minimumFractionDigits: 0,
+                                    maximumFractionDigits: 2
+                                }).format(value);
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: (value) => {
+                                return new Intl.NumberFormat('en-US', {
+                                    style: data?.format === 'currency' ? 'currency' : 'decimal',
+                                    currency: 'USD',
+                                    notation: 'compact',
+                                    minimumFractionDigits: 0,
+                                    maximumFractionDigits: 1
+                                }).format(value);
+                            }
+                        }
+                    },
+                    x: {
+                        ticks: {
+                            maxRotation: 45,
+                            minRotation: 45
+                        }
+                    }
+                }
+            }
+        }), [data?.labels, data?.values, data?.format]); // Only recreate config when these values change
+
+        React.useEffect(() => {
+            if (!chartRef.current || !data || !data.labels || !data.values) return;
+
+            // Check if data has actually changed
+            if (dataRef.current &&
+                JSON.stringify(dataRef.current) === JSON.stringify(data)) {
+                return;
+            }
+
+            // Update data reference
+            dataRef.current = data;
+
+            // Cleanup previous chart instance
+            if (chartInstance.current) {
+                chartInstance.current.destroy();
+                chartInstance.current = null;
+            }
+
+            // Create new chart instance
+            const ctx = chartRef.current.getContext('2d');
+            chartInstance.current = new Chart(ctx, chartConfig);
+
+            // Cleanup on unmount
+            return () => {
+                if (chartInstance.current) {
+                    chartInstance.current.destroy();
+                    chartInstance.current = null;
+                }
+            };
+        }, [chartConfig]); // Only depend on memoized config
+
+        if (!data || !data.labels || !data.values) return null;
 
         return (
             <div style={{
                 backgroundColor: 'white',
                 borderRadius: '8px',
-                padding: '1.5rem',
-                height: 'auto',
+                padding: '1rem',
+                height: '100%',
                 display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'flex-start',
-                alignItems: 'flex-start',
-                border: '1px solid #e1e9ff',
-                color: '#5f6368',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                margin: '0.5rem 0'
+                flexDirection: 'column'
             }}>
-                <div style={{
-                    fontSize: '1rem',
-                    fontWeight: 500,
-                    color: '#1a73e8',
-                    marginBottom: '0.75rem',
-                    width: '100%'
-                }}>
-                    {title || type}
-                </div>
-
-                {isMetric ? (
+                {typeof title === 'string' && title && (
                     <div style={{
-                        fontSize: '2rem',
-                        fontWeight: 'bold',
-                        color: '#202124',
-                        marginTop: '1rem'
+                        fontSize: '1rem',
+                        fontWeight: '500',
+                        color: '#111827',
+                        marginBottom: '1rem'
                     }}>
-                        {dataPoints !== null && dataPoints !== undefined ? dataPoints : 'N/A'}
+                        {title}
                     </div>
-                ) : (
+                )}
+                <div style={{
+                    flex: 1,
+                    minHeight: 0,
+                    position: 'relative'
+                }}>
+                    <canvas ref={chartRef} />
+                </div>
+                {typeof context === 'string' && context && (
                     <div style={{
-                        width: '100%',
-                        textAlign: 'center',
-                        marginTop: '0.5rem'
+                        fontSize: '0.875rem',
+                        color: '#6b7280',
+                        marginTop: '1rem',
+                        textAlign: 'center'
                     }}>
-                        <div style={{
-                            fontStyle: 'italic',
-                            marginBottom: '0.5rem'
-                        }}>
-                            {type.charAt(0).toUpperCase() + type.slice(1)}
-                        </div>
-                        <div style={{ fontSize: '0.9rem' }}>
-                            {dataPoints !== null && dataPoints !== undefined ? `${dataPoints} data points` : ''}
-                        </div>
+                        {context}
                     </div>
                 )}
             </div>
@@ -272,354 +402,183 @@ const AnalysisHistory = ({ onStartAnalysis }) => {
     const renderSimpleVisualizationGrid = (results) => {
         if (!results) return null;
 
-        // Extract visualization data from the results
-        let visualizations = [];
-
-        // Handle dashboard format
-        if (results.visualization?.components) {
-            // Add metrics
-            if (results.visualization.components.metrics) {
-                visualizations.push({
-                    id: 'metrics',
-                    type: 'metrics',
-                    title: 'Metrics',
-                    data: results.visualization.components.metrics,
-                    width: results.visualization.components.metrics.width || 6,
-                    height: results.visualization.components.metrics.height || 2
-                });
-            }
-
-            // Add bar chart
-            if (results.visualization.components.barChart) {
-                visualizations.push({
-                    id: 'barChart',
-                    type: 'bar',
-                    title: results.visualization.components.barChart.title || 'Bar Chart',
-                    data: results.visualization.components.barChart.data,
-                    width: results.visualization.components.barChart.width || 6,
-                    height: results.visualization.components.barChart.height || 4
-                });
-            }
+        // Get visualization data from the results
+        const visualization = results.visualization;
+        if (!visualization || !visualization.components) {
+            return null;
         }
 
-        // Create default visualizations if none are present
-        if (visualizations.length === 0) {
-            visualizations = [
-                { id: 'metrics', type: 'metrics', title: 'Metrics', value: 'N/A', width: 6, height: 2 },
-                { id: 'bar1', type: 'bar', title: 'Revenue Comparison of Electric Products', dataPoints: 5, width: 6, height: 4 }
-            ];
-        }
-
-        // Render the metrics card with detailed styling
-        const renderMetricItem = (item) => {
-            // Determine trend direction
-            const trendColor = item.trend === 'up' ? '#0f9d58' : (item.trend === 'down' ? '#d93025' : '#5f6368');
-            const trendIcon = item.trend === 'up' ? '↑' : (item.trend === 'down' ? '↓' : '–');
-
-            return (
-                <div key={item.title} style={{
-                    backgroundColor: 'white',
-                    borderRadius: '8px',
-                    padding: '1.25rem',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-                    marginBottom: '1rem',
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: '1rem'
-                }}>
-                    <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        width: '40px',
-                        height: '40px',
-                        backgroundColor: '#e8f0fe',
-                        borderRadius: '50%',
-                        color: '#1967d2',
-                        fontSize: '1.2rem'
-                    }}>
-                        {item.icon === 'attach_money' ? '$' : '📊'}
-                    </div>
-
-                    <div style={{ flex: 1 }}>
-                        <div style={{
-                            fontSize: '0.85rem',
-                            color: '#64748b',
-                            marginBottom: '0.5rem'
-                        }}>
-                            {item.title}
-                        </div>
-
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
-                            <div style={{
-                                fontSize: '1.75rem',
-                                fontWeight: 'bold',
-                                color: '#202124'
-                            }}>
-                                {item.value}
-                            </div>
-
-                            {item.trend && (
-                                <div style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    color: trendColor,
-                                    fontSize: '0.9rem',
-                                    fontWeight: '500'
-                                }}>
-                                    {trendIcon}
-                                </div>
-                            )}
-                        </div>
-
-                        {item.comparison && (
-                            <div style={{
-                                fontSize: '0.85rem',
-                                color: '#5f6368',
-                                marginTop: '0.5rem'
-                            }}>
-                                <span style={{ fontWeight: '500' }}>{item.comparison.label}:</span> {item.comparison.value}
-                            </div>
-                        )}
-                    </div>
-                </div>
-            );
-        };
-
-        // Render chart with enhanced styling
-        const renderChart = (chart) => {
-            if (!chart || !chart.data) {
-                return renderPlaceholderChart('bar', chart?.title || 'Chart', 5);
-            }
-
-            // Create HTML bar chart visualization
-            const labels = chart.data.labels || [];
-            const values = chart.data.values || [];
-            const colors = chart.data.colors || ['#4CAF50', '#2196F3', '#FFC107', '#FF8042', '#9C27B0', '#82ca9d'];
-            const maxValue = Math.max(...values);
-
-            const formatValue = (val) => {
-                if (val >= 1000000) {
-                    return `${(val / 1000000).toFixed(1)}M`;
-                } else if (val >= 1000) {
-                    return `${(val / 1000).toFixed(1)}K`;
-                }
-                return new Intl.NumberFormat().format(val);
-            };
-
-            return (
-                <div style={{
-                    backgroundColor: 'white',
-                    borderRadius: '8px',
-                    padding: '1.5rem',
-                    border: '1px solid #e1e9ff'
-                }}>
-                    <div style={{
-                        color: '#334155',
-                        fontSize: '1rem',
-                        fontWeight: '500',
-                        marginBottom: '1rem',
-                        paddingBottom: '0.5rem',
-                        borderBottom: '1px solid #f1f5f9'
-                    }}>
-                        {chart.title}
-                    </div>
-
-                    <div style={{ height: '300px', position: 'relative', marginTop: '1rem' }}>
-                        {/* Chart area */}
-                        <div style={{
-                            position: 'absolute',
-                            top: 0,
-                            right: 0,
-                            bottom: 30,
-                            left: 50,
-                            display: 'flex',
-                            alignItems: 'flex-end',
-                            borderLeft: '1px solid #e2e8f0',
-                            borderBottom: '1px solid #e2e8f0'
-                        }}>
-                            {labels.map((label, index) => {
-                                const value = values[index] || 0;
-                                const percentage = (value / maxValue) * 100;
-
-                                return (
-                                    <div key={index} style={{
-                                        flex: 1,
-                                        height: '100%',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        justifyContent: 'flex-end',
-                                        alignItems: 'center',
-                                        padding: '0 4px'
-                                    }}>
-                                        <div
-                                            style={{
-                                                width: '70%',
-                                                height: `${percentage}%`,
-                                                backgroundColor: colors[index % colors.length],
-                                                borderRadius: '4px 4px 0 0',
-                                                minHeight: '4px',
-                                                position: 'relative',
-                                                transition: 'all 0.3s ease'
-                                            }}
-                                            onMouseEnter={(e) => {
-                                                e.currentTarget.style.opacity = '0.8';
-                                                const tooltip = e.currentTarget.querySelector('.tooltip');
-                                                if (tooltip) tooltip.style.opacity = '1';
-                                            }}
-                                            onMouseLeave={(e) => {
-                                                e.currentTarget.style.opacity = '1';
-                                                const tooltip = e.currentTarget.querySelector('.tooltip');
-                                                if (tooltip) tooltip.style.opacity = '0';
-                                            }}
-                                        >
-                                            <div className="tooltip" style={{
-                                                position: 'absolute',
-                                                top: '-30px',
-                                                left: '50%',
-                                                transform: 'translateX(-50%)',
-                                                backgroundColor: 'rgba(0,0,0,0.8)',
-                                                color: 'white',
-                                                padding: '4px 8px',
-                                                borderRadius: '4px',
-                                                fontSize: '0.75rem',
-                                                whiteSpace: 'nowrap',
-                                                opacity: 0,
-                                                transition: 'opacity 0.2s'
-                                            }}>
-                                                {formatValue(value)}
-                                            </div>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-
-                        {/* Y-axis */}
-                        <div style={{
-                            position: 'absolute',
-                            left: 0,
-                            top: 0,
-                            bottom: 30,
-                            width: '50px',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            justifyContent: 'space-between',
-                            alignItems: 'flex-end',
-                            padding: '0 8px 0 0',
-                            fontSize: '0.75rem',
-                            color: '#64748b'
-                        }}>
-                            <div>{formatValue(maxValue)}</div>
-                            <div>{formatValue(maxValue * 0.75)}</div>
-                            <div>{formatValue(maxValue * 0.5)}</div>
-                            <div>{formatValue(maxValue * 0.25)}</div>
-                            <div>0</div>
-                        </div>
-
-                        {/* X-axis */}
-                        <div style={{
-                            position: 'absolute',
-                            left: 50,
-                            right: 0,
-                            bottom: 0,
-                            height: '30px',
-                            display: 'flex'
-                        }}>
-                            {labels.map((label, index) => (
-                                <div key={index} style={{
-                                    flex: 1,
-                                    padding: '8px 4px 0',
-                                    textAlign: 'center',
-                                    fontSize: '0.75rem',
-                                    color: '#64748b',
-                                    whiteSpace: 'nowrap',
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis'
-                                }}>
-                                    {label}
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    {chart.data.context?.description && (
-                        <div style={{
-                            fontSize: '0.75rem',
-                            color: '#64748b',
-                            marginTop: '1rem',
-                            textAlign: 'center',
-                            fontStyle: 'italic'
-                        }}>
-                            {chart.data.context.description}
-                        </div>
-                    )}
-                </div>
-            );
-        };
+        const { components, layout = [] } = visualization;
 
         return (
             <div style={{ marginBottom: '2rem' }}>
                 <h3 style={{
                     color: '#202124',
-                    marginBottom: '1rem',
+                    marginBottom: '1.5rem',
                     borderBottom: '1px solid #e1e9ff',
-                    paddingBottom: '0.5rem',
+                    paddingBottom: '0.75rem',
                     fontSize: '1.2rem',
-                    fontWeight: 'normal'
-                }}>Visualization</h3>
+                    fontWeight: '500'
+                }}>
+                    Analysis Visualization
+                </h3>
 
                 {/* Dashboard Grid Layout */}
                 <div style={{
                     display: 'grid',
                     gridTemplateColumns: 'repeat(12, 1fr)',
-                    gap: '1rem'
+                    gap: '1rem',
+                    marginBottom: '2rem'
                 }}>
-                    {visualizations.map(viz => {
-                        if (viz.type === 'metrics' && results.visualization?.components?.metrics?.items) {
-                            // Render metrics section
-                            return (
-                                <div key={viz.id} style={{
-                                    gridColumn: `span ${viz.width}`,
-                                    gridRow: `span ${viz.height}`
-                                }}>
+                    {layout.map((section) => {
+                        const componentData = components[section.name];
+                        if (!componentData) return null;
+
+                        // Ensure data is properly formatted for charts
+                        let formattedData = null;
+                        if (componentData.type === 'bar' && componentData.data) {
+                            formattedData = {
+                                labels: Array.isArray(componentData.data.labels) ? componentData.data.labels : [],
+                                values: Array.isArray(componentData.data.values) ? componentData.data.values : [],
+                                format: componentData.data.format || 'decimal'
+                            };
+                        }
+
+                        return (
+                            <div key={section.name} style={{
+                                gridColumn: `span ${section.width || 12}`,
+                                gridRow: `span ${section.height || 1}`,
+                                minHeight: section.height === 1 ? '120px' : '300px'
+                            }}>
+                                {componentData.type === 'metrics' && componentData.items ? (
                                     <div style={{
                                         backgroundColor: '#f8fafc',
                                         borderRadius: '8px',
-                                        padding: '1rem'
+                                        padding: '1rem',
+                                        height: '100%'
                                     }}>
-                                        {results.visualization.components.metrics.items.map(item =>
-                                            renderMetricItem(item)
-                                        )}
+                                        {componentData.items.map((item) => renderMetricItem(item))}
                                     </div>
-                                </div>
-                            );
-                        } else if (viz.type === 'bar' && results.visualization?.components?.barChart) {
-                            // Render bar chart
-                            return (
-                                <div key={viz.id} style={{
-                                    gridColumn: `span ${viz.width}`,
-                                    gridRow: `span ${viz.height}`
-                                }}>
-                                    {renderChart({
-                                        title: viz.title,
-                                        data: results.visualization.components.barChart.data
-                                    })}
-                                </div>
-                            );
-                        } else {
-                            // Render placeholder
-                            return (
-                                <div key={viz.id} style={{
-                                    gridColumn: `span ${viz.width}`,
-                                    gridRow: `span ${viz.height}`
-                                }}>
-                                    {renderPlaceholderChart(viz.type, viz.title, viz.dataPoints)}
-                                </div>
-                            );
-                        }
+                                ) : componentData.type === 'bar' && formattedData ? (
+                                    <ChartComponent
+                                        title={componentData.title}
+                                        data={formattedData}
+                                        context={componentData.context}
+                                    />
+                                ) : null}
+                            </div>
+                        );
                     })}
                 </div>
+
+                {/* Insights and Analysis */}
+                <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(2, 1fr)',
+                    gap: '1.5rem',
+                    marginTop: '2rem'
+                }}>
+                    {results.insights && Object.entries(results.insights).map(([key, data]) => {
+                        if (!data || (Array.isArray(data) && data.length === 0)) return null;
+
+                        const titleMap = {
+                            'insights': 'Key Insights',
+                            'trends': 'Trends',
+                            'findings': 'Findings',
+                            'recommendations': 'Recommendations'
+                        };
+
+                        return (
+                            <div key={key} style={{
+                                backgroundColor: 'white',
+                                borderRadius: '8px',
+                                padding: '1.5rem',
+                                border: '1px solid #e1e9ff'
+                            }}>
+                                <h4 style={{
+                                    color: '#1a73e8',
+                                    marginTop: 0,
+                                    marginBottom: '1rem',
+                                    fontSize: '1.1rem',
+                                    fontWeight: '500'
+                                }}>
+                                    {titleMap[key] || key.charAt(0).toUpperCase() + key.slice(1)}
+                                </h4>
+                                <ul style={{
+                                    margin: 0,
+                                    padding: 0,
+                                    listStyle: 'none'
+                                }}>
+                                    {Array.isArray(data) ? data.map((item, index) => (
+                                        <li key={index} style={{
+                                            marginBottom: '0.75rem',
+                                            paddingLeft: '1.5rem',
+                                            position: 'relative',
+                                            color: '#374151',
+                                            fontSize: '0.9375rem',
+                                            lineHeight: '1.5'
+                                        }}>
+                                            <span style={{
+                                                position: 'absolute',
+                                                left: 0,
+                                                color: '#1a73e8',
+                                                fontWeight: '500'
+                                            }}>•</span>
+                                            {item}
+                                        </li>
+                                    )) : (
+                                        <li style={{ color: '#374151' }}>{data}</li>
+                                    )}
+                                </ul>
+                            </div>
+                        );
+                    })}
+                </div>
+
+                {/* Metadata Section */}
+                {results.metadata && (
+                    <div style={{
+                        marginTop: '2rem',
+                        backgroundColor: 'white',
+                        borderRadius: '8px',
+                        padding: '1.5rem',
+                        border: '1px solid #e1e9ff'
+                    }}>
+                        <details>
+                            <summary style={{
+                                cursor: 'pointer',
+                                color: '#1a73e8',
+                                fontWeight: '500',
+                                marginBottom: '1rem'
+                            }}>
+                                Analysis Details
+                            </summary>
+                            <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
+                                gap: '1rem',
+                                fontSize: '0.875rem',
+                                color: '#374151'
+                            }}>
+                                {results.metadata.processing_time && (
+                                    <div>Processing Time: {results.metadata.processing_time}</div>
+                                )}
+                                {results.metadata.analysis_type && (
+                                    <div>Analysis Type: {results.metadata.analysis_type}</div>
+                                )}
+                                {results.metadata.record_count && (
+                                    <div>Records Analyzed: {results.metadata.record_count}</div>
+                                )}
+                                {results.metadata.analyzing_query && (
+                                    <div>Query: {results.metadata.analyzing_query}</div>
+                                )}
+                                {results.metadata.timestamp && (
+                                    <div>Timestamp: {new Date(results.metadata.timestamp).toLocaleString()}</div>
+                                )}
+                            </div>
+                        </details>
+                    </div>
+                )}
             </div>
         );
     };

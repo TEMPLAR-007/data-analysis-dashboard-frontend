@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import api from '../utils/api';
+import { api } from '../utils/api';
 import { BarChart, Bar, PieChart, Pie, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
 import AnalysisForm from './AnalysisForm';
 import AnalysisHistory from './AnalysisHistory';
@@ -37,14 +37,25 @@ const QueryForm = ({ onQuerySaved }) => {
 
     const fetchSavedQueries = async () => {
         setIsLoading(true);
+        setError(null);
         try {
             const result = await api.getAllSavedQueries();
+            console.log('Saved queries result:', result);
+
             if (result.success) {
-                setSavedQueries(result.queries || []);
+                // Handle different response formats
+                const queries = result.queries || result.data || [];
+                setSavedQueries(queries);
+
+                if (queries.length === 0) {
+                    console.log('No saved queries found for this user');
+                }
             } else {
-                setError('Failed to load query history');
+                console.error('Failed to load query history:', result.message);
+                setError(result.message || 'Failed to load query history');
             }
         } catch (err) {
+            console.error('Error loading queries:', err);
             setError('Error loading queries: ' + err.message);
         } finally {
             setIsLoading(false);
@@ -87,6 +98,23 @@ const QueryForm = ({ onQuerySaved }) => {
     // Function to normalize query objects ensuring consistent field names
     const normalizeQueryObject = (queryObj) => {
         if (!queryObj) return queryObj;
+
+        console.log('Normalizing query object:', queryObj);
+
+        // Handle table_name with user prefixes
+        if (queryObj.table_name) {
+            // Extract the actual table name without user prefix
+            const tableName = queryObj.table_name;
+            const match = tableName.match(/^user_[a-z0-9]+_(.+)$/i);
+
+            if (match && match[1]) {
+                // Store the user-prefixed name but display the friendly name
+                queryObj.original_table_name = tableName;
+                queryObj.display_table_name = match[1];
+            } else {
+                queryObj.display_table_name = tableName;
+            }
+        }
 
         // Check for nested query object that contains the actual query details
         if (queryObj.query && typeof queryObj.query === 'object') {
@@ -862,6 +890,10 @@ const QueryForm = ({ onQuerySaved }) => {
             })
             .join('');
 
+        // Determine the table name to display (without user prefix)
+        const tableName = query.display_table_name ||
+            (query.table_name ? formatColumnName(query.table_name) : null);
+
         return (
             <div style={{
                 backgroundColor: '#f8faff',
@@ -871,6 +903,9 @@ const QueryForm = ({ onQuerySaved }) => {
             }}>
                 <div style={{ marginBottom: '0.5rem', color: '#666' }}>
                     <strong>Results:</strong> {recordCount} {recordCount === 1 ? 'record' : 'records'}
+                    {tableName && (
+                        <span> from <strong>{tableName}</strong></span>
+                    )}
                 </div>
                 <div style={{ fontSize: '0.9rem', color: '#444' }}>
                     <strong>Query:</strong> {formattedQuery}

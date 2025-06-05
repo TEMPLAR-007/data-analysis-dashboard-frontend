@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
-import api from '../utils/api';
+import { api } from '../utils/api';
+import { auth } from '../utils/auth';
 
 const FileUpload = ({ onFileUploaded }) => {
     const [file, setFile] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
+    const [isLoadingTables, setIsLoadingTables] = useState(false);
     const [error, setError] = useState(null);
     const [success, setSuccess] = useState(null);
     const [isDragging, setIsDragging] = useState(false);
@@ -18,38 +20,90 @@ const FileUpload = ({ onFileUploaded }) => {
     }, []);
 
     const fetchTables = async () => {
+        setIsLoadingTables(true);
+        setError(null);
         try {
+            // Check if user is authenticated
+            if (!auth.isAuthenticated()) {
+                setError('Authentication required. Please log in to view your data tables.');
+                setTables([]);
+                return;
+            }
+
             const result = await api.getTables();
+            console.log('Fetched tables result:', result);
+
             if (result.tables) {
                 // Filter out system tables
                 const systemTables = ['migrations', 'saved_queries', 'analysis_history', 'analysis_sessions', 'uploaded_files'];
-                setTables(result.tables.filter(name => !systemTables.includes(name)));
+
+                // Handle both array of strings and array of objects formats
+                let processedTables = result.tables;
+
+                // Check if the tables are objects with tableName property
+                if (result.tables.length > 0 && typeof result.tables[0] === 'object') {
+                    processedTables = result.tables.map(table => table.tableName || table.name || table.table_name || '');
+                }
+
+                setTables(processedTables.filter(name => !systemTables.includes(name)));
             } else {
-                console.error('Failed to fetch tables:', result.message);
+                setError(result.message || 'Failed to fetch tables');
+                setTables([]);
             }
         } catch (err) {
             console.error('Error fetching tables:', err);
+            setError('Failed to load tables. Please check your connection and try again.');
+            setTables([]);
+        } finally {
+            setIsLoadingTables(false);
         }
     };
 
     const getTableSchema = async (tableName) => {
-        if (tableSchemas[tableName]) return;
+        // Ensure tableName is a string
+        const tableNameStr = typeof tableName === 'object'
+            ? (tableName.tableName || tableName.name || tableName.table_name || JSON.stringify(tableName))
+            : String(tableName);
+
+        if (tableSchemas[tableNameStr]) return;
 
         try {
-            const result = await api.getTableSchema(tableName);
+            // Update UI to show loading for this table
+            setTableSchemas(prev => ({
+                ...prev,
+                [tableNameStr]: 'loading'
+            }));
+
+            const result = await api.getTableSchema(tableNameStr);
+            console.log(`Schema result for ${tableNameStr}:`, result);
+
             if (result.columns) {
                 setTableSchemas(prev => ({
                     ...prev,
-                    [tableName]: result.columns
+                    [tableNameStr]: result.columns
+                }));
+            } else {
+                setTableSchemas(prev => ({
+                    ...prev,
+                    [tableNameStr]: { error: result.message || 'Failed to load schema' }
                 }));
             }
         } catch (err) {
-            console.error(`Error fetching schema for ${tableName}:`, err);
+            console.error(`Error fetching schema for ${tableNameStr}:`, err);
+            setTableSchemas(prev => ({
+                ...prev,
+                [tableNameStr]: { error: err.message || 'Error loading schema' }
+            }));
         }
     };
 
     const handleDeleteTable = async (tableName) => {
-        setTableToDelete(tableName);
+        // Ensure tableName is a string
+        const tableNameStr = typeof tableName === 'object'
+            ? (tableName.tableName || tableName.name || tableName.table_name || JSON.stringify(tableName))
+            : String(tableName);
+
+        setTableToDelete(tableNameStr);
     };
 
     const confirmDeleteTable = async () => {
@@ -61,7 +115,13 @@ const FileUpload = ({ onFileUploaded }) => {
             if (result.success) {
                 setSuccess(`Table '${tableToDelete}' has been deleted`);
                 // Remove table from list
-                setTables(prev => prev.filter(name => name !== tableToDelete));
+                setTables(prev => prev.filter(name => {
+                    // Handle object or string
+                    const nameStr = typeof name === 'object'
+                        ? (name.tableName || name.name || name.table_name || '')
+                        : String(name);
+                    return nameStr !== tableToDelete;
+                }));
                 // Remove schema
                 setTableSchemas(prev => {
                     const newState = { ...prev };
@@ -116,12 +176,19 @@ const FileUpload = ({ onFileUploaded }) => {
             return;
         }
 
+        // Check if user is authenticated
+        if (!auth.isAuthenticated()) {
+            setError('Authentication required. Please log in to upload files.');
+            return;
+        }
+
         setIsLoading(true);
         setError(null);
         setSuccess(null);
 
         try {
             const result = await api.uploadFile(file);
+            console.log('Upload result:', result);
 
             if (result.success) {
                 setSuccess(`File successfully uploaded as table '${result.table || file.name.split('.')[0]}'`);
@@ -137,6 +204,7 @@ const FileUpload = ({ onFileUploaded }) => {
                 setError(result.message || 'Error uploading file');
             }
         } catch (err) {
+            console.error('File upload error:', err);
             setError(err.message || 'Failed to upload file');
         } finally {
             setIsLoading(false);
@@ -146,6 +214,43 @@ const FileUpload = ({ onFileUploaded }) => {
     return (
         <div className="main-dashboard">
             <div className="dashboard-top" style={{ width: '100%', maxWidth: '100%', padding: '1rem' }}>
+                {/* Authentication Troubleshooting Alert */}
+                {!auth.isAuthenticated() && (
+                    <div style={{
+                        backgroundColor: '#fff3e0',
+                        border: '1px solid #ffcc80',
+                        borderRadius: '8px',
+                        padding: '1rem',
+                        marginBottom: '1.5rem',
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: '1rem'
+                    }}>
+                        <div style={{ fontSize: '1.5rem', color: '#f57c00' }}>
+                            ⚠️
+                        </div>
+                        <div>
+                            <h4 style={{ margin: '0 0 0.5rem 0', color: '#e65100' }}>
+                                Authentication Required
+                            </h4>
+                            <p style={{ margin: '0 0 0.5rem 0' }}>
+                                You need to be logged in to view and upload data files.
+                            </p>
+                            <a href="/login" style={{
+                                backgroundColor: '#fb8c00',
+                                color: 'white',
+                                textDecoration: 'none',
+                                padding: '0.5rem 1rem',
+                                borderRadius: '4px',
+                                display: 'inline-block',
+                                fontWeight: '500'
+                            }}>
+                                Go to Login
+                            </a>
+                        </div>
+                    </div>
+                )}
+
                 <div style={{
                     backgroundColor: 'white',
                     borderRadius: '8px',
@@ -299,7 +404,7 @@ const FileUpload = ({ onFileUploaded }) => {
                                 cursor: 'pointer'
                             }}
                         >
-                            Refresh
+                            {isLoadingTables ? 'Loading...' : 'Refresh'}
                         </button>
                     </h3>
 
@@ -357,7 +462,32 @@ const FileUpload = ({ onFileUploaded }) => {
                         </div>
                     )}
 
-                    {tables.length === 0 ? (
+                    {isLoadingTables ? (
+                        <div style={{
+                            padding: '2rem',
+                            textAlign: 'center',
+                            color: '#5f6368',
+                            backgroundColor: '#f8f9fa',
+                            borderRadius: '8px'
+                        }}>
+                            <div style={{
+                                border: '3px solid #e1e9ff',
+                                borderTopColor: '#1a73e8',
+                                borderRadius: '50%',
+                                width: '24px',
+                                height: '24px',
+                                animation: 'spin 1s linear infinite',
+                                margin: '0 auto 1rem'
+                            }} />
+                            <p style={{ margin: 0 }}>Loading your data tables...</p>
+                            <style>{`
+                                @keyframes spin {
+                                    0% { transform: rotate(0deg); }
+                                    100% { transform: rotate(360deg); }
+                                }
+                            `}</style>
+                        </div>
+                    ) : tables.length === 0 ? (
                         <div style={{
                             padding: '1rem',
                             backgroundColor: '#f8f9fa',
@@ -372,128 +502,165 @@ const FileUpload = ({ onFileUploaded }) => {
                             display: 'grid',
                             gap: '0.75rem'
                         }}>
-                            {tables.map(tableName => (
-                                <div key={tableName} style={{
-                                    border: '1px solid #e1e9ff',
-                                    borderRadius: '8px',
-                                    overflow: 'hidden'
-                                }}>
-                                    <div style={{
-                                        padding: '0.75rem 1rem',
-                                        backgroundColor: '#f8faff',
-                                        borderBottom: '1px solid #e1e9ff',
-                                        display: 'flex',
-                                        justifyContent: 'space-between',
-                                        alignItems: 'center'
+                            {tables.map(tableName => {
+                                // If tableName is an object (which shouldn't happen after our fix, but just to be safe)
+                                const tableNameStr = typeof tableName === 'object'
+                                    ? (tableName.tableName || tableName.name || tableName.table_name || JSON.stringify(tableName))
+                                    : String(tableName);
+
+                                return (
+                                    <div key={tableNameStr} style={{
+                                        border: '1px solid #e1e9ff',
+                                        borderRadius: '8px',
+                                        overflow: 'hidden'
                                     }}>
                                         <div style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '0.5rem'
-                                        }}>
-                                            <span style={{
-                                                fontSize: '1.4rem',
-                                                color: '#1a73e8'
-                                            }}>📊</span>
-                                            <span style={{
-                                                fontWeight: '500',
-                                                color: '#202124'
-                                            }}>{tableName}</span>
-                                        </div>
-                                        <div>
-                                            <button
-                                                onClick={() => getTableSchema(tableName)}
-                                                style={{
-                                                    backgroundColor: '#e8f0fe',
-                                                    color: '#1967d2',
-                                                    border: 'none',
-                                                    borderRadius: '4px',
-                                                    padding: '0.4rem 0.75rem',
-                                                    marginRight: '0.5rem',
-                                                    fontSize: '0.85rem',
-                                                    cursor: 'pointer'
-                                                }}
-                                            >
-                                                View Schema
-                                            </button>
-                                            <button
-                                                onClick={() => handleDeleteTable(tableName)}
-                                                style={{
-                                                    backgroundColor: '#fdeded',
-                                                    color: '#d32f2f',
-                                                    border: 'none',
-                                                    borderRadius: '4px',
-                                                    padding: '0.4rem 0.75rem',
-                                                    fontSize: '0.85rem',
-                                                    cursor: 'pointer'
-                                                }}
-                                            >
-                                                Delete
-                                            </button>
-                                        </div>
-                                    </div>
-                                    {tableSchemas[tableName] && (
-                                        <div style={{
                                             padding: '0.75rem 1rem',
-                                            maxHeight: '300px',
-                                            overflowY: 'auto'
+                                            backgroundColor: '#f8faff',
+                                            borderBottom: '1px solid #e1e9ff',
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center'
                                         }}>
-                                            <h4 style={{
-                                                margin: '0 0 0.75rem 0',
-                                                fontSize: '0.9rem',
-                                                color: '#5f6368'
-                                            }}>Table Schema</h4>
-                                            <table style={{
-                                                width: '100%',
-                                                borderCollapse: 'collapse',
-                                                fontSize: '0.85rem'
+                                            <div style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '0.5rem'
                                             }}>
-                                                <thead>
-                                                    <tr>
-                                                        <th style={{
-                                                            textAlign: 'left',
-                                                            padding: '0.5rem',
-                                                            borderBottom: '1px solid #e1e9ff',
-                                                            backgroundColor: '#f8faff'
-                                                        }}>Column</th>
-                                                        <th style={{
-                                                            textAlign: 'left',
-                                                            padding: '0.5rem',
-                                                            borderBottom: '1px solid #e1e9ff',
-                                                            backgroundColor: '#f8faff'
-                                                        }}>Type</th>
-                                                        <th style={{
-                                                            textAlign: 'left',
-                                                            padding: '0.5rem',
-                                                            borderBottom: '1px solid #e1e9ff',
-                                                            backgroundColor: '#f8faff'
-                                                        }}>Nullable</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {tableSchemas[tableName].map((column, idx) => (
-                                                        <tr key={idx}>
-                                                            <td style={{
-                                                                padding: '0.5rem',
-                                                                borderBottom: '1px solid #f0f0f0'
-                                                            }}>{column.column_name}</td>
-                                                            <td style={{
-                                                                padding: '0.5rem',
-                                                                borderBottom: '1px solid #f0f0f0',
-                                                                color: getDataTypeColor(column.data_type)
-                                                            }}>{column.data_type}</td>
-                                                            <td style={{
-                                                                padding: '0.5rem',
-                                                                borderBottom: '1px solid #f0f0f0'
-                                                            }}>{column.is_nullable}</td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
+                                                <span style={{
+                                                    fontSize: '1.4rem',
+                                                    color: '#1a73e8'
+                                                }}>📊</span>
+                                                <span style={{
+                                                    fontWeight: '500',
+                                                    color: '#202124'
+                                                }}>{tableNameStr}</span>
+                                            </div>
+                                            <div>
+                                                <button
+                                                    onClick={() => getTableSchema(tableNameStr)}
+                                                    style={{
+                                                        backgroundColor: '#e8f0fe',
+                                                        color: '#1967d2',
+                                                        border: 'none',
+                                                        borderRadius: '4px',
+                                                        padding: '0.4rem 0.75rem',
+                                                        marginRight: '0.5rem',
+                                                        fontSize: '0.85rem',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                >
+                                                    View Schema
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDeleteTable(tableNameStr)}
+                                                    style={{
+                                                        backgroundColor: '#fdeded',
+                                                        color: '#d93025',
+                                                        border: 'none',
+                                                        borderRadius: '4px',
+                                                        padding: '0.4rem 0.75rem',
+                                                        fontSize: '0.85rem',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                >
+                                                    Delete
+                                                </button>
+                                            </div>
                                         </div>
-                                    )}
-                                </div>
-                            ))}
+                                        {tableSchemas[tableNameStr] && (
+                                            <div style={{
+                                                padding: '0.75rem 1rem',
+                                                maxHeight: '300px',
+                                                overflowY: 'auto'
+                                            }}>
+                                                <h4 style={{
+                                                    margin: '0 0 0.75rem 0',
+                                                    fontSize: '0.9rem',
+                                                    color: '#5f6368'
+                                                }}>Table Schema</h4>
+
+                                                {tableSchemas[tableNameStr] === 'loading' ? (
+                                                    <div style={{
+                                                        textAlign: 'center',
+                                                        padding: '1rem',
+                                                        color: '#5f6368'
+                                                    }}>
+                                                        <div style={{
+                                                            border: '2px solid #e1e9ff',
+                                                            borderTopColor: '#1a73e8',
+                                                            borderRadius: '50%',
+                                                            width: '20px',
+                                                            height: '20px',
+                                                            animation: 'spin 1s linear infinite',
+                                                            margin: '0 auto 0.5rem'
+                                                        }} />
+                                                        <p style={{ margin: 0 }}>Loading schema...</p>
+                                                    </div>
+                                                ) : tableSchemas[tableNameStr].error ? (
+                                                    <div style={{
+                                                        padding: '0.75rem',
+                                                        backgroundColor: '#fce8e6',
+                                                        color: '#c5221f',
+                                                        borderRadius: '4px',
+                                                        fontSize: '0.85rem'
+                                                    }}>
+                                                        {tableSchemas[tableNameStr].error}
+                                                    </div>
+                                                ) : (
+                                                    <table style={{
+                                                        width: '100%',
+                                                        borderCollapse: 'collapse',
+                                                        fontSize: '0.85rem'
+                                                    }}>
+                                                        <thead>
+                                                            <tr>
+                                                                <th style={{
+                                                                    textAlign: 'left',
+                                                                    padding: '0.5rem',
+                                                                    borderBottom: '1px solid #e1e9ff',
+                                                                    backgroundColor: '#f8faff'
+                                                                }}>Column</th>
+                                                                <th style={{
+                                                                    textAlign: 'left',
+                                                                    padding: '0.5rem',
+                                                                    borderBottom: '1px solid #e1e9ff',
+                                                                    backgroundColor: '#f8faff'
+                                                                }}>Type</th>
+                                                                <th style={{
+                                                                    textAlign: 'left',
+                                                                    padding: '0.5rem',
+                                                                    borderBottom: '1px solid #e1e9ff',
+                                                                    backgroundColor: '#f8faff'
+                                                                }}>Nullable</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {tableSchemas[tableNameStr].map((column, idx) => (
+                                                                <tr key={idx}>
+                                                                    <td style={{
+                                                                        padding: '0.5rem',
+                                                                        borderBottom: '1px solid #f0f0f0'
+                                                                    }}>{column.column_name}</td>
+                                                                    <td style={{
+                                                                        padding: '0.5rem',
+                                                                        borderBottom: '1px solid #f0f0f0',
+                                                                        color: getDataTypeColor(column.data_type)
+                                                                    }}>{column.data_type}</td>
+                                                                    <td style={{
+                                                                        padding: '0.5rem',
+                                                                        borderBottom: '1px solid #f0f0f0'
+                                                                    }}>{column.is_nullable}</td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
                         </div>
                     )}
                 </div>

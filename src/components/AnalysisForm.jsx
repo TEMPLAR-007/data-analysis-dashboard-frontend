@@ -1,175 +1,274 @@
-import { useState } from 'react';
-import api from '../utils/api';
+import { useState, useEffect } from 'react';
+import { api } from '../utils/api';
 
-const AnalysisForm = ({ queryIds, onClose, onAnalysisComplete }) => {
+const AnalysisForm = ({ onClose }) => {
     const [analysisRequest, setAnalysisRequest] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState(null);
+    const [error, setError] = useState('');
+    const [results, setResults] = useState(null);
+    const [analysisHistory, setAnalysisHistory] = useState([]);
+    const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
+    useEffect(() => {
+        fetchAnalysisHistory();
+    }, []);
+
+    const fetchAnalysisHistory = async () => {
+        setIsLoadingHistory(true);
+        try {
+            const response = await api.getAnalysisHistory();
+            if (response.success) {
+                setAnalysisHistory(response.history);
+            } else {
+                console.error('Failed to fetch analysis history:', response.message);
+            }
+        } catch (error) {
+            console.error('Error fetching analysis history:', error);
+        }
+        setIsLoadingHistory(false);
+    };
+
+    const handleSubmit = async (event) => {
+        event.preventDefault();
         setIsLoading(true);
-        setError(null);
+        setError('');
 
         try {
-            console.log('Submitting analysis for queries:', queryIds); // Debug log
-
-            // Create analysis session
             const response = await api.createAnalysis({
-                query_ids: queryIds,
-                analysis_request: analysisRequest
+                analysis_request: analysisRequest,
+                query_ids: []  // Since this form doesn't have query selection
             });
 
-            console.log('Analysis creation response:', response); // Debug log
-
             if (!response.success) {
-                throw new Error(response.message || 'Failed to create analysis');
+                setError(response.message);
+                setIsLoading(false);
+                return;
             }
 
-            if (!response.analysis_id) {
-                throw new Error('Server response missing analysis ID. Please try again or contact support.');
-            }
-
-            // Poll for results
-            const results = await pollAnalysisResults(response.analysis_id);
-            onAnalysisComplete(results);
-            onClose();
-        } catch (err) {
-            console.error('Analysis error:', err);
-            setError(
-                `Analysis failed: ${err.message}. ` +
-                (err.message.includes('analysis ID') ?
-                    'This might be a temporary server issue. Please try again.' :
-                    'Please check your query selection and try again.')
-            );
-        } finally {
+            const analysisId = response.analysis_id;
+            await pollAnalysisResults(analysisId);
+            // Refresh history after successful submission
+            await fetchAnalysisHistory();
+        } catch (error) {
+            console.error('Analysis submission error:', error);
+            setError(error.message || 'Failed to submit analysis request');
             setIsLoading(false);
         }
     };
 
     const pollAnalysisResults = async (analysisId) => {
-        const maxAttempts = 30; // Maximum number of polling attempts
-        const pollInterval = 2000; // Poll every 2 seconds
+        let attempts = 0;
+        const maxAttempts = 30;
 
-        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        while (attempts < maxAttempts) {
             try {
                 const response = await api.getAnalysisResults(analysisId);
 
-                if (response.status === 'completed') {
-                    return response;
-                } else if (response.status === 'failed') {
-                    throw new Error(response.message || 'Analysis failed');
+                if (!response.success) {
+                    setError(response.message);
+                    setIsLoading(false);
+                    return;
                 }
 
-                // Wait before next poll
-                await new Promise(resolve => setTimeout(resolve, pollInterval));
-            } catch (err) {
-                console.error('Polling error:', err);
-                throw new Error('Error polling analysis results: ' + err.message);
+                if (response.status === 'completed') {
+                    setResults(response.results);
+                    setIsLoading(false);
+                    onClose();
+                    return;
+                }
+
+                if (response.status === 'failed') {
+                    setError('Analysis failed. Please try again.');
+                    setIsLoading(false);
+                    return;
+                }
+
+                // If still processing, wait and try again
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                attempts++;
+            } catch (error) {
+                console.error('Polling error:', error);
+                setError(error.message || 'Failed to get analysis results');
+                setIsLoading(false);
+                return;
             }
         }
 
-        throw new Error('Analysis timed out after ' + maxAttempts + ' attempts');
+        setError('Analysis timed out. Please try again.');
+        setIsLoading(false);
     };
 
     return (
-        <div className="analysis-form-overlay" style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            zIndex: 1000
-        }}>
-            <div className="analysis-form-modal" style={{
-                backgroundColor: 'white',
-                borderRadius: '8px',
-                padding: '2rem',
-                width: '90%',
-                maxWidth: '600px',
-                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
-            }}>
-                <h2 style={{ marginTop: 0, color: '#1a73e8' }}>Analyze Selected Queries</h2>
-
+        <div className="analysis-form-container">
+            <div className="analysis-form">
+                <h2>New Analysis</h2>
                 <form onSubmit={handleSubmit}>
-                    <div style={{ marginBottom: '1rem' }}>
-                        <label htmlFor="analysis-request" style={{
-                            display: 'block',
-                            marginBottom: '0.5rem',
-                            fontWeight: 500
-                        }}>
-                            What would you like to analyze?
-                        </label>
-                        <textarea
-                            id="analysis-request"
-                            value={analysisRequest}
-                            onChange={(e) => setAnalysisRequest(e.target.value)}
-                            placeholder="E.g., Analyze sales trends for specific product categories"
-                            style={{
-                                width: '100%',
-                                minHeight: '100px',
-                                padding: '0.75rem',
-                                borderRadius: '4px',
-                                border: '1px solid #ddd',
-                                resize: 'vertical'
-                            }}
-                            required
-                        />
-                    </div>
-
-                    {error && (
-                        <div style={{
-                            backgroundColor: '#ffebee',
-                            color: '#c62828',
-                            padding: '0.75rem',
-                            borderRadius: '4px',
-                            marginBottom: '1rem'
-                        }}>
-                            {error}
-                        </div>
-                    )}
-
-                    <div style={{
-                        display: 'flex',
-                        justifyContent: 'flex-end',
-                        gap: '1rem',
-                        marginTop: '1.5rem'
-                    }}>
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            style={{
-                                padding: '0.5rem 1rem',
-                                borderRadius: '4px',
-                                border: '1px solid #ddd',
-                                backgroundColor: 'white',
-                                cursor: 'pointer'
-                            }}
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={isLoading || !analysisRequest.trim()}
-                            style={{
-                                padding: '0.5rem 1rem',
-                                borderRadius: '4px',
-                                border: 'none',
-                                backgroundColor: '#1a73e8',
-                                color: 'white',
-                                cursor: isLoading ? 'not-allowed' : 'pointer',
-                                opacity: isLoading ? 0.7 : 1
-                            }}
-                        >
-                            {isLoading ? 'Analyzing...' : 'Start Analysis'}
-                        </button>
-                    </div>
+                    <textarea
+                        value={analysisRequest}
+                        onChange={(e) => setAnalysisRequest(e.target.value)}
+                        placeholder="Enter your analysis request..."
+                        required
+                    />
+                    {error && <div className="error-message">{error}</div>}
+                    {results && <div className="success-message">Analysis completed successfully!</div>}
+                    <button type="submit" disabled={isLoading}>
+                        {isLoading ? 'Processing...' : 'Submit Analysis'}
+                    </button>
                 </form>
             </div>
+
+            <div className="analysis-history">
+                <h2>Analysis History</h2>
+                {isLoadingHistory ? (
+                    <div className="loading-message">Loading history...</div>
+                ) : analysisHistory.length > 0 ? (
+                    <ul className="history-list">
+                        {analysisHistory.map((analysis) => (
+                            <li key={analysis.id} className="history-item">
+                                <div className="history-request">{analysis.request}</div>
+                                <div className="history-status">
+                                    Status: <span className={`status-${analysis.status}`}>{analysis.status}</span>
+                                </div>
+                                <div className="history-timestamp">
+                                    {new Date(analysis.timestamp).toLocaleString()}
+                                </div>
+                                {analysis.results && (
+                                    <div className="history-results">
+                                        <strong>Results:</strong>
+                                        <pre>{JSON.stringify(analysis.results, null, 2)}</pre>
+                                    </div>
+                                )}
+                            </li>
+                        ))}
+                    </ul>
+                ) : (
+                    <div className="no-history">No analysis history available</div>
+                )}
+            </div>
+
+            <style>{`
+                .analysis-form-container {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 2rem;
+                    max-width: 800px;
+                    margin: 0 auto;
+                    padding: 1rem;
+                }
+
+                .analysis-form, .analysis-history {
+                    background: white;
+                    padding: 1.5rem;
+                    border-radius: 8px;
+                    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                }
+
+                h2 {
+                    margin-top: 0;
+                    color: #333;
+                    margin-bottom: 1rem;
+                }
+
+                textarea {
+                    width: 100%;
+                    min-height: 100px;
+                    padding: 0.75rem;
+                    border: 1px solid #ddd;
+                    border-radius: 4px;
+                    margin-bottom: 1rem;
+                    resize: vertical;
+                }
+
+                .history-list {
+                    list-style: none;
+                    padding: 0;
+                    margin: 0;
+                }
+
+                .history-item {
+                    border: 1px solid #eee;
+                    border-radius: 4px;
+                    padding: 1rem;
+                    margin-bottom: 1rem;
+                }
+
+                .history-request {
+                    font-weight: 500;
+                    margin-bottom: 0.5rem;
+                }
+
+                .history-status {
+                    font-size: 0.9rem;
+                    margin-bottom: 0.5rem;
+                }
+
+                .history-timestamp {
+                    font-size: 0.8rem;
+                    color: #666;
+                }
+
+                .status-completed {
+                    color: #2e7d32;
+                }
+
+                .status-failed {
+                    color: #c62828;
+                }
+
+                .status-processing {
+                    color: #1565c0;
+                }
+
+                .loading-message, .no-history {
+                    text-align: center;
+                    color: #666;
+                    padding: 1rem;
+                }
+
+                .error-message {
+                    color: #c62828;
+                    background: #ffebee;
+                    padding: 0.75rem;
+                    border-radius: 4px;
+                    margin-bottom: 1rem;
+                }
+
+                .success-message {
+                    color: #2e7d32;
+                    background: #e8f5e9;
+                    padding: 0.75rem;
+                    border-radius: 4px;
+                    margin-bottom: 1rem;
+                }
+
+                button {
+                    background: #1a73e8;
+                    color: white;
+                    border: none;
+                    padding: 0.75rem 1.5rem;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-weight: 500;
+                }
+
+                button:disabled {
+                    background: #ccc;
+                    cursor: not-allowed;
+                }
+
+                .history-results {
+                    margin-top: 0.5rem;
+                    padding: 0.5rem;
+                    background: #f5f5f5;
+                    border-radius: 4px;
+                }
+
+                .history-results pre {
+                    margin: 0.5rem 0 0;
+                    white-space: pre-wrap;
+                    font-size: 0.9rem;
+                }
+            `}</style>
         </div>
     );
 };

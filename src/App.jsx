@@ -1,11 +1,26 @@
 import { useState, useEffect } from 'react'
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import './App.css'
 import QueryForm from './components/QueryForm'
 import AnalysisTab from './components/AnalysisTab'
 import FileUpload from './components/FileUpload'
-import api from './utils/api'
+import Login from './components/Login'
+import Register from './components/Register'
+import { api } from './utils/api'
+import { auth } from './utils/auth'
 
-function App() {
+// Protected route wrapper component
+const ProtectedRoute = ({ children }) => {
+  // Check if user is authenticated
+  if (!auth.isAuthenticated()) {
+    // Redirect to login page if not authenticated
+    return <Navigate to="/login" replace />;
+  }
+
+  return children;
+};
+
+function Dashboard() {
   const [activeView, setActiveView] = useState('queries')
   const [apiHealth, setApiHealth] = useState(null)
   const [uploadSuccess, setUploadSuccess] = useState(null)
@@ -41,20 +56,31 @@ function App() {
     }
   }
 
+  const handleLogout = async () => {
+    await api.logout();
+    window.location.href = '/login';
+  }
+
   return (
     <div className="app">
       <header className="app-header">
         <h1>Data Analysis Dashboard</h1>
-        {apiHealth && apiHealth.status !== 'ok' && (
-          <div className="api-status error">
-            {apiHealth.message || 'API Service Unavailable'}
+        <div className="header-right">
+          <div className="user-info">
+            <span>{auth.getUser()?.name || auth.getUser()?.email}</span>
+            <button onClick={handleLogout} className="logout-btn">Logout</button>
           </div>
-        )}
-        {uploadSuccess && (
-          <div className="api-status success">
-            {uploadSuccess}
-          </div>
-        )}
+          {apiHealth && apiHealth.status !== 'ok' && (
+            <div className="api-status error">
+              {apiHealth.message || 'API Service Unavailable'}
+            </div>
+          )}
+          {uploadSuccess && (
+            <div className="api-status success">
+              {uploadSuccess}
+            </div>
+          )}
+        </div>
         <nav>
           <button
             className={activeView === 'queries' ? 'active' : ''}
@@ -98,6 +124,24 @@ function App() {
         <p>Data Analysis System • MVP Version</p>
       </footer>
     </div>
+  )
+}
+
+function App() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/dashboard" element={
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        } />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+    </Router>
   )
 }
 

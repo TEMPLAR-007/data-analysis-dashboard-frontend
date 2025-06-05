@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import AnalysisHistory from './AnalysisHistory';
-import api from '../utils/api';
+import { api } from '../utils/api';
 
 const AnalysisTab = ({ currentAnalysis, onClose }) => {
     const [showHistory, setShowHistory] = useState(!currentAnalysis);
