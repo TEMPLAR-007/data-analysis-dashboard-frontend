@@ -1,6 +1,6 @@
+import React from 'react'
 import { useState, useEffect } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
-import './App.css'
 import QueryForm from './components/QueryForm'
 import AnalysisTab from './components/AnalysisTab'
 import FileUpload from './components/FileUpload'
@@ -62,40 +62,46 @@ function Dashboard() {
   }
 
   return (
-    <div className="app">
-      <header className="app-header">
-        <h1>Data Analysis Dashboard</h1>
-        <div className="header-right">
-          <div className="user-info">
-            <span>{auth.getUser()?.name || auth.getUser()?.email}</span>
-            <button onClick={handleLogout} className="logout-btn">Logout</button>
+    <div className="flex flex-col min-h-screen bg-[#f5f5f5] text-[#333333]">
+      {/* Header with Tailwind CSS */}
+      <header className="bg-[#3f51b5] text-white px-8 py-4 shadow-md">
+        <h1 className="text-2xl font-bold m-0">Data Analysis Dashboard</h1>
+        <div className="flex justify-end items-center mt-2">
+          <div className="flex items-center mr-4">
+            <span className="mr-3">{auth.getUser()?.name || auth.getUser()?.email}</span>
+            <button
+              onClick={handleLogout}
+              className="bg-transparent border-none text-white px-4 py-2 rounded cursor-pointer transition-colors hover:bg-white/10"
+            >
+              Logout
+            </button>
           </div>
           {apiHealth && apiHealth.status !== 'ok' && (
-            <div className="api-status error">
+            <div className="bg-red-100 text-red-700 px-4 py-2 rounded">
               {apiHealth.message || 'API Service Unavailable'}
             </div>
           )}
           {uploadSuccess && (
-            <div className="api-status success">
+            <div className="bg-green-100 text-green-700 px-4 py-2 rounded">
               {uploadSuccess}
             </div>
           )}
         </div>
-        <nav>
+        <nav className="flex gap-4 mt-4">
           <button
-            className={activeView === 'queries' ? 'active' : ''}
+            className={`bg-transparent border-none text-white px-4 py-2 rounded cursor-pointer transition-colors hover:bg-white/10 ${activeView === 'queries' ? 'bg-white/20 font-bold' : ''}`}
             onClick={() => setActiveView('queries')}
           >
             Queries
           </button>
           <button
-            className={activeView === 'upload' ? 'active' : ''}
+            className={`bg-transparent border-none text-white px-4 py-2 rounded cursor-pointer transition-colors hover:bg-white/10 ${activeView === 'upload' ? 'bg-white/20 font-bold' : ''}`}
             onClick={() => setActiveView('upload')}
           >
             Upload Data
           </button>
           <button
-            className={activeView === 'analysis' ? 'active' : ''}
+            className={`bg-transparent border-none text-white px-4 py-2 rounded cursor-pointer transition-colors hover:bg-white/10 ${activeView === 'analysis' ? 'bg-white/20 font-bold' : ''}`}
             onClick={() => setActiveView('analysis')}
           >
             Analysis
@@ -103,7 +109,8 @@ function Dashboard() {
         </nav>
       </header>
 
-      <main className="app-content">
+      {/* Main content with Tailwind CSS */}
+      <main className="flex-1 p-8 max-w-7xl mx-auto w-full box-border">
         {activeView === 'queries' && (
           <QueryForm onQuerySaved={handleQuerySaved} />
         )}
@@ -120,7 +127,8 @@ function Dashboard() {
         )}
       </main>
 
-      <footer className="app-footer">
+      {/* Footer with Tailwind CSS */}
+      <footer className="bg-[#3f51b5] text-white py-4 text-center mt-auto">
         <p>Data Analysis System • MVP Version</p>
       </footer>
     </div>

@@ -3,6 +3,9 @@ import { api } from '../utils/api';
 import { BarChart, Bar, PieChart, Pie, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
 import AnalysisForm from './AnalysisForm';
 import AnalysisHistory from './AnalysisHistory';
+import DataTable from './ui/DataTable';
+import Card from './ui/Card';
+import Button from './ui/Button';
 
 const QueryForm = ({ onQuerySaved }) => {
     const [userQuery, setUserQuery] = useState('');
@@ -13,6 +16,11 @@ const QueryForm = ({ onQuerySaved }) => {
     const [pendingDeleteIndex, setPendingDeleteIndex] = useState(null);
     const [selectedQueries, setSelectedQueries] = useState([]);
     const [showAnalysisForm, setShowAnalysisForm] = useState(false);
+    const [queryFilter, setQueryFilter] = useState('');
+    const [sortOrder, setSortOrder] = useState('newest');
+    const [activeTab, setActiveTab] = useState('all');
+    const [modalOpen, setModalOpen] = useState(false);
+    const [selectedQueryIndex, setSelectedQueryIndex] = useState(null);
 
     const exampleQueries = [
         "What is the total amount spent in each category",
@@ -22,8 +30,20 @@ const QueryForm = ({ onQuerySaved }) => {
         "What is the average quantity ordered per customer"
     ];
 
-    // Pie chart colors
-    const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
+    // Pie chart colors - updating with a more modern and vibrant color palette
+    const COLORS = [
+        '#4361ee', '#3a0ca3', '#7209b7', '#f72585', '#4cc9f0',
+        '#4895ef', '#560bad', '#b5179e', '#f15bb5', '#00b4d8',
+        '#0077b6', '#023e8a', '#03045e', '#d00000', '#ffbe0b'
+    ];
+
+    // Gradient colors for charts
+    const GRADIENT_COLORS = {
+        blue: ['#4361ee', '#4895ef'],
+        purple: ['#7209b7', '#560bad'],
+        pink: ['#f72585', '#f15bb5'],
+        teal: ['#4cc9f0', '#00b4d8']
+    };
 
     // Fetch saved queries on component mount
     useEffect(() => {
@@ -196,7 +216,7 @@ const QueryForm = ({ onQuerySaved }) => {
 
     const handleCloseQuery = async (index) => {
         try {
-            const queryToDelete = displayedQueries[index];
+            const queryToDelete = filteredAndSortedQueries[index];
             if (!queryToDelete) return;
 
             // Determine the query ID to delete
@@ -218,7 +238,10 @@ const QueryForm = ({ onQuerySaved }) => {
 
             if (result.success) {
                 // Remove from display if successful
-                setDisplayedQueries(prev => prev.filter((_, i) => i !== index));
+                setDisplayedQueries(prev => prev.filter(q => {
+                    const id = q.query_id || q.id;
+                    return id !== queryId;
+                }));
                 // Refresh the saved queries list
                 fetchSavedQueries();
             } else {
@@ -239,606 +262,52 @@ const QueryForm = ({ onQuerySaved }) => {
         );
     };
 
-    // Add this function to format chart placeholders in a simple way matching the screenshot
-    const renderSimplePlaceholderChart = (type, title, dataPoints) => {
-        return (
-            <div style={{
-                backgroundColor: 'white',
-                borderRadius: '8px',
-                padding: '1.5rem',
-                border: '1px solid #e1e9ff',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                minHeight: '150px',
-                textAlign: 'center'
-            }}>
-                <div style={{
-                    color: '#1a73e8',
-                    fontWeight: '500',
-                    marginBottom: '1rem'
-                }}>
-                    {title}
-                </div>
+    // Function to filter and sort queries
+    const getFilteredAndSortedQueries = () => {
+        if (!displayedQueries.length) return [];
 
-                {type.toLowerCase() === 'metrics' ? (
-                    <div style={{
-                        fontSize: '2rem',
-                        fontWeight: 'bold',
-                        color: '#202124'
-                    }}>
-                        N/A
-                    </div>
-                ) : (
-                    <div>
-                        <div style={{
-                            fontStyle: 'italic',
-                            marginBottom: '0.5rem'
-                        }}>
-                            {type.charAt(0).toUpperCase() + type.slice(1)}
-                        </div>
-                        {dataPoints && (
-                            <div style={{ fontSize: '0.9rem', color: '#5f6368' }}>
-                                {dataPoints} data points
-                            </div>
-                        )}
-                    </div>
-                )}
-            </div>
-        );
-    };
+        // First filter by search term
+        let filtered = displayedQueries;
+        if (queryFilter) {
+            const lowerFilter = queryFilter.toLowerCase();
+            filtered = displayedQueries.filter(query => {
+                const queryText = query.original_query || '';
+                const tableName = query.display_table_name || query.table_name || '';
+                return queryText.toLowerCase().includes(lowerFilter) ||
+                    tableName.toLowerCase().includes(lowerFilter);
+            });
+        }
 
-    // Update the renderDashboardFromResponse function to display real charts from the API data
-    const renderDashboardFromResponse = (response) => {
-        // Check if we have a valid response with dashboard data
-        if (!response || !response.success) return null;
+        // Then filter by tab
+        if (activeTab === 'recent') {
+            // Get queries from last 24 hours
+            const oneDayAgo = new Date();
+            oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+            filtered = filtered.filter(query => {
+                const timestamp = new Date(query.timestamp || query.created_at || Date.now());
+                return timestamp > oneDayAgo;
+            });
+        } else if (activeTab === 'chartable') {
+            // Get queries that can be visualized
+            filtered = filtered.filter(query => isChartable(query.filtered_data));
+        }
 
-        // Get dashboard data - works with different API response formats
-        const dashboardData = response.dashboard || response.data?.dashboard || response.results?.dashboard || response;
+        // Then sort
+        return [...filtered].sort((a, b) => {
+            const dateA = new Date(a.timestamp || a.created_at || 0);
+            const dateB = new Date(b.timestamp || b.created_at || 0);
 
-        console.log("Dashboard data:", dashboardData);
-
-        if (!dashboardData) return null;
-
-        // Colors for charts
-        const CHART_COLORS = ['#4CAF50', '#2196F3', '#FFC107', '#FF8042', '#9C27B0', '#82ca9d'];
-
-        // Helper to render an HTML bar chart directly without using ReCharts
-        const renderHtmlBarChart = (chartData) => {
-            console.log("Rendering HTML bar chart with data:", chartData);
-
-            if (!chartData || !chartData.data || !chartData.data.labels || !chartData.data.values) {
-                console.log("Invalid chart data, using placeholder");
-                return renderSimplePlaceholderChart('bar', chartData?.title || 'Bar Chart', 5);
+            if (sortOrder === 'newest') {
+                return dateB - dateA;
+            } else if (sortOrder === 'oldest') {
+                return dateA - dateB;
+            } else if (sortOrder === 'records') {
+                const recordsA = a.filtered_data?.length || 0;
+                const recordsB = b.filtered_data?.length || 0;
+                return recordsB - recordsA;
             }
-
-            try {
-                const labels = chartData.data.labels;
-                const values = chartData.data.values;
-                const colors = chartData.data.colors || ['#4CAF50', '#2196F3', '#FFC107', '#FF8042', '#9C27B0', '#82ca9d'];
-                const maxValue = Math.max(...values);
-
-                // Format currency values
-                const formatValue = (val) => {
-                    // Use comma formatting and add $ for currency values
-                    return '$' + new Intl.NumberFormat().format(val);
-                };
-
-                return (
-                    <div style={{ width: '100%', height: '300px', position: 'relative' }}>
-                        {/* Chart area with borders */}
-                        <div style={{
-                            position: 'absolute',
-                            top: 0,
-                            right: 0,
-                            bottom: 30,
-                            left: 50,
-                            display: 'flex',
-                            alignItems: 'flex-end',
-                            borderLeft: '1px solid #e2e8f0',
-                            borderBottom: '1px solid #e2e8f0'
-                        }}>
-                            {labels.map((label, index) => {
-                                const value = values[index] || 0;
-                                const percentage = (value / maxValue) * 100;
-
-                                return (
-                                    <div key={index} style={{
-                                        flex: 1,
-                                        height: '100%',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        justifyContent: 'flex-end',
-                                        alignItems: 'center',
-                                        padding: '0 4px'
-                                    }}>
-                                        <div
-                                            style={{
-                                                width: '70%',
-                                                height: `${percentage}%`,
-                                                backgroundColor: colors[index % colors.length],
-                                                borderRadius: '4px 4px 0 0',
-                                                minHeight: '4px',
-                                                position: 'relative',
-                                                transition: 'all 0.3s ease'
-                                            }}
-                                            onMouseEnter={(e) => {
-                                                e.currentTarget.style.opacity = '0.8';
-                                                const tooltip = e.currentTarget.querySelector('.tooltip');
-                                                if (tooltip) tooltip.style.opacity = '1';
-                                            }}
-                                            onMouseLeave={(e) => {
-                                                e.currentTarget.style.opacity = '1';
-                                                const tooltip = e.currentTarget.querySelector('.tooltip');
-                                                if (tooltip) tooltip.style.opacity = '0';
-                                            }}
-                                        >
-                                            <div className="tooltip" style={{
-                                                position: 'absolute',
-                                                top: '-30px',
-                                                left: '50%',
-                                                transform: 'translateX(-50%)',
-                                                backgroundColor: 'rgba(0,0,0,0.8)',
-                                                color: 'white',
-                                                padding: '4px 8px',
-                                                borderRadius: '4px',
-                                                fontSize: '0.75rem',
-                                                whiteSpace: 'nowrap',
-                                                opacity: 0,
-                                                transition: 'opacity 0.2s'
-                                            }}>
-                                                {chartData.data.tooltips?.[index] || formatValue(value)}
-                                            </div>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-
-                        {/* Y-axis with values */}
-                        <div style={{
-                            position: 'absolute',
-                            left: 0,
-                            top: 0,
-                            bottom: 30,
-                            width: '50px',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            justifyContent: 'space-between',
-                            alignItems: 'flex-end',
-                            padding: '0 8px 0 0',
-                            fontSize: '0.75rem',
-                            color: '#64748b'
-                        }}>
-                            <div>{formatValue(maxValue)}</div>
-                            <div>{formatValue(maxValue * 0.75)}</div>
-                            <div>{formatValue(maxValue * 0.5)}</div>
-                            <div>{formatValue(maxValue * 0.25)}</div>
-                            <div>$0</div>
-                        </div>
-
-                        {/* X-axis with labels */}
-                        <div style={{
-                            position: 'absolute',
-                            left: 50,
-                            right: 0,
-                            bottom: 0,
-                            height: '30px',
-                            display: 'flex'
-                        }}>
-                            {labels.map((label, index) => (
-                                <div key={index} style={{
-                                    flex: 1,
-                                    padding: '8px 4px 0',
-                                    textAlign: 'center',
-                                    fontSize: '0.75rem',
-                                    color: '#64748b',
-                                    whiteSpace: 'nowrap',
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis'
-                                }}>
-                                    {label}
-                                </div>
-                            ))}
-                        </div>
-
-                        {/* Chart description */}
-                        {chartData.context?.description && (
-                            <div style={{
-                                position: 'absolute',
-                                bottom: '-25px',
-                                left: 0,
-                                right: 0,
-                                fontSize: '0.75rem',
-                                color: '#64748b',
-                                textAlign: 'center',
-                                fontStyle: 'italic'
-                            }}>
-                                {chartData.context.description}
-                            </div>
-                        )}
-                    </div>
-                );
-            } catch (error) {
-                console.error("Error rendering bar chart:", error);
-
-                // If chart fails, use simple fallback
-                return (
-                    <div style={{
-                        padding: '1rem',
-                        backgroundColor: '#f8fafc',
-                        borderRadius: '8px',
-                        height: '300px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                        textAlign: 'center'
-                    }}>
-                        <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📊</div>
-                        <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#1a73e8' }}>
-                            {chartData.title || 'Bar Chart'}
-                        </div>
-                        <div style={{ color: '#666', marginTop: '0.5rem' }}>
-                            {chartData.data.labels.length} data points available
-                        </div>
-                    </div>
-                );
-            }
-        };
-
-        // Helper to render actual metrics with data from the API
-        const renderMetricCards = (metricsData) => {
-            if (!metricsData || !metricsData.items || metricsData.items.length === 0) {
-                return renderSimplePlaceholderChart('metrics', 'Metrics', 'N/A');
-            }
-
-            return (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                    {metricsData.items.map((metric, index) => (
-                        <div key={index} style={{
-                            backgroundColor: 'white',
-                            padding: '1.25rem',
-                            borderRadius: '8px',
-                            boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
-                        }}>
-                            <h3 style={{
-                                margin: '0 0 0.5rem 0',
-                                color: '#202124',
-                                fontSize: '1rem',
-                                fontWeight: '500',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.5rem'
-                            }}>
-                                <span style={{
-                                    width: '24px',
-                                    height: '24px',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    backgroundColor: '#e8f0fe',
-                                    color: '#1967d2',
-                                    borderRadius: '50%',
-                                    fontSize: '1rem'
-                                }}>
-                                    {metric.icon === 'attach_money' ? '$' : '📊'}
-                                </span>
-                                {metric.title}
-                            </h3>
-
-                            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                                <div style={{
-                                    fontSize: '2rem',
-                                    fontWeight: 'bold',
-                                    color: '#202124'
-                                }}>
-                                    {metric.value}
-                                </div>
-
-                                {metric.trend && (
-                                    <div style={{
-                                        color: metric.trend === 'up' ? '#0f9d58' : '#d93025',
-                                        fontSize: '0.875rem',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        marginBottom: '0.25rem'
-                                    }}>
-                                        {metric.trend === 'up' ? '↑' : '↓'}
-                                    </div>
-                                )}
-                            </div>
-
-                            {metric.comparison && (
-                                <div style={{ fontSize: '0.875rem', color: '#5f6368' }}>
-                                    <span style={{ fontWeight: '500' }}>{metric.comparison.label}:</span> {metric.comparison.value}
-                                </div>
-                            )}
-                        </div>
-                    ))}
-                </div>
-            );
-        };
-
-        return (
-            <div>
-                <h3 style={{
-                    color: '#202124',
-                    marginBottom: '1rem',
-                    borderBottom: '1px solid #e1e9ff',
-                    paddingBottom: '0.5rem',
-                    fontSize: '1.2rem',
-                    fontWeight: 'normal'
-                }}>Visualization</h3>
-
-                <div style={{
-                    display: 'flex',
-                    flexWrap: 'wrap',
-                    gap: '1rem'
-                }}>
-                    {/* Render metrics if available */}
-                    {dashboardData.visualization?.components?.metrics && (
-                        <div style={{
-                            flexBasis: '45%',
-                            flexGrow: 1
-                        }}>
-                            {renderMetricCards(dashboardData.visualization.components.metrics)}
-                        </div>
-                    )}
-
-                    {/* Render bar chart if available */}
-                    {dashboardData.visualization?.components?.barChart && (
-                        <div style={{
-                            flexBasis: '45%',
-                            flexGrow: 1
-                        }}>
-                            <div style={{
-                                backgroundColor: 'white',
-                                borderRadius: '8px',
-                                padding: '1.5rem',
-                                border: '1px solid #e1e9ff'
-                            }}>
-                                <div style={{
-                                    color: '#1a73e8',
-                                    fontWeight: '500',
-                                    marginBottom: '1rem'
-                                }}>
-                                    {dashboardData.visualization.components.barChart.title || 'Chart'}
-                                </div>
-                                {renderHtmlBarChart(dashboardData.visualization.components.barChart)}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* If no chart components are found, render placeholders */}
-                    {!dashboardData.visualization?.components?.metrics && !dashboardData.visualization?.components?.barChart && (
-                        <>
-                            <div style={{ flexBasis: '45%', flexGrow: 1 }}>
-                                {renderSimplePlaceholderChart('metrics', 'Metrics', null)}
-                            </div>
-                            <div style={{ flexBasis: '45%', flexGrow: 1 }}>
-                                {renderSimplePlaceholderChart('bar', 'Revenue Comparison of Electric Products', 5)}
-                            </div>
-                        </>
-                    )}
-                </div>
-
-                {/* Insights Sections */}
-                {dashboardData.insights && (
-                    <div style={{ marginTop: '2rem' }}>
-                        {Object.entries(dashboardData.insights).map(([key, content]) => {
-                            if (!content || (Array.isArray(content) && content.length === 0)) return null;
-
-                            // Map section keys to display titles
-                            const titleMap = {
-                                'insights': 'Key Insights',
-                                'trends': 'Trends',
-                                'findings': 'Findings',
-                                'recommendations': 'Recommendations'
-                            };
-
-                            return (
-                                <div key={key} style={{ marginBottom: '1.5rem' }}>
-                                    <h3 style={{
-                                        color: '#202124',
-                                        marginBottom: '0.5rem',
-                                        fontSize: '1.1rem',
-                                        fontWeight: 'normal'
-                                    }}>
-                                        {titleMap[key] || key.charAt(0).toUpperCase() + key.slice(1)}
-                                    </h3>
-
-                                    <ul style={{
-                                        paddingLeft: '1.5rem',
-                                        margin: '0.5rem 0',
-                                        color: '#3c4043'
-                                    }}>
-                                        {Array.isArray(content) ?
-                                            content.map((item, i) => (
-                                                <li key={i} style={{ marginBottom: '0.5rem' }}>
-                                                    {typeof item === 'string' ? item : JSON.stringify(item)}
-                                                </li>
-                                            )) :
-                                            <li>{content}</li>
-                                        }
-                                    </ul>
-                                </div>
-                            );
-                        })}
-                    </div>
-                )}
-
-                {/* Add event listeners for bar hover effects after rendering */}
-                <div style={{ display: 'none' }} ref={el => {
-                    if (el) {
-                        setTimeout(() => {
-                            // Get all bar elements
-                            const bars = document.querySelectorAll('.bar-tooltip');
-                            if (bars.length === 0) return;
-
-                            // Add hover effect to each bar
-                            bars.forEach(tooltip => {
-                                const barElement = tooltip.parentElement;
-                                if (!barElement) return;
-
-                                barElement.addEventListener('mouseenter', () => {
-                                    tooltip.style.opacity = '1';
-                                });
-
-                                barElement.addEventListener('mouseleave', () => {
-                                    tooltip.style.opacity = '0';
-                                });
-                            });
-                        }, 500);
-                    }
-                }}></div>
-            </div>
-        );
-    };
-
-    // Update renderChart function to use our simpler dashboard renderer
-    const renderChart = (data, chartType) => {
-        // If we have a response that looks like a dashboard format, use our enhanced renderer
-        if (data && (data.dashboard || data.success)) {
-            return renderDashboardFromResponse(data);
-        }
-
-        if (!data || data.length === 0) return null;
-
-        // Get the first two numeric columns for charting
-        const columns = Object.keys(data[0]);
-        const numericColumns = columns.filter(col =>
-            typeof data[0][col] === 'number' || !isNaN(parseFloat(data[0][col]))
-        );
-
-        if (numericColumns.length < 1) {
-            return <div>No numeric data available for charting</div>;
-        }
-
-        const valueKey = numericColumns[0];
-        const nameKey = columns.find(col => col !== valueKey) || valueKey;
-
-        // Format the data for the chart
-        const formattedData = data.map(item => ({
-            name: formatColumnName(item[nameKey]),
-            value: parseFloat(item[valueKey])
-        }));
-
-        // Format numbers for tooltip
-        const formatValue = (value) => new Intl.NumberFormat().format(value);
-
-        // Function to format column names
-        function formatColumnName(name) {
-            if (typeof name !== 'string') return name;
-            return name
-                .split('_')
-                .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-                .join(' ');
-        }
-
-        switch (chartType) {
-            case 'pie':
-                return (
-                    <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                            <Pie
-                                data={formattedData}
-                                cx="50%"
-                                cy="50%"
-                                labelLine={true}
-                                outerRadius={80}
-                                fill="#8884d8"
-                                dataKey="value"
-                                nameKey="name"
-                                label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                            >
-                                {formattedData.map((entry, index) => (
-                                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                ))}
-                            </Pie>
-                            <Tooltip formatter={(value) => formatValue(value)} />
-                            <Legend verticalAlign="bottom" height={36} />
-                        </PieChart>
-                    </ResponsiveContainer>
-                );
-            case 'bar':
-                return (
-                    <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={formattedData}>
-                            <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                            <YAxis tick={{ fontSize: 12 }} />
-                            <Tooltip formatter={(value) => formatValue(value)} />
-                            <Legend />
-                            <Bar dataKey="value" fill="#8884d8" />
-                        </BarChart>
-                    </ResponsiveContainer>
-                );
-            case 'line':
-                return (
-                    <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={formattedData}>
-                            <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                            <YAxis tick={{ fontSize: 12 }} />
-                            <Tooltip formatter={(value) => formatValue(value)} />
-                            <Legend />
-                            <Line type="monotone" dataKey="value" stroke="#8884d8" />
-                        </LineChart>
-                    </ResponsiveContainer>
-                );
-            default:
-                return <div>Unknown chart type</div>;
-        }
-    };
-
-    const renderDataTable = (data) => {
-        if (!data || data.length === 0) return null;
-
-        const formatColumnName = (name) => {
-            return name
-                .split('_')
-                .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-                .join(' ');
-        };
-
-        return (
-            <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                        <tr>
-                            {Object.keys(data[0]).map((header, index) => (
-                                <th key={index} style={{
-                                    backgroundColor: '#f8faff',
-                                    padding: '0.75rem',
-                                    textAlign: 'left',
-                                    borderBottom: '2px solid #e1e9ff',
-                                    whiteSpace: 'nowrap'
-                                }}>
-                                    {formatColumnName(header)}
-                                </th>
-                            ))}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {data.map((row, rowIndex) => (
-                            <tr key={rowIndex}>
-                                {Object.values(row).map((cell, cellIndex) => (
-                                    <td key={cellIndex} style={{
-                                        padding: '0.75rem',
-                                        borderBottom: '1px solid #e1e9ff',
-                                        whiteSpace: 'nowrap'
-                                    }}>
-                                        {typeof cell === 'number' ? new Intl.NumberFormat().format(cell) : cell}
-                                    </td>
-                                ))}
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-        );
+            return 0;
+        });
     };
 
     // Function to check if data is suitable for charting
@@ -867,161 +336,470 @@ const QueryForm = ({ onQuerySaved }) => {
         return hasNumericValues && distinctCategories >= 2;
     };
 
-    const renderSummary = (query) => {
-        if (!query || !query.filtered_data) return null;
+    // Get the filtered and sorted queries
+    const filteredAndSortedQueries = getFilteredAndSortedQueries();
 
-        const recordCount = query.filtered_data.length;
-        const formatColumnName = (name) => {
-            return name
-                .split('_')
-                .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-                .join(' ');
-        };
+    // Get the currently selected query for the modal
+    const selectedQuery = selectedQueryIndex !== null ? filteredAndSortedQueries[selectedQueryIndex] : null;
 
-        // Format the query text for display
-        const formattedQuery = query.original_query
-            .split(/\b/)
-            .map(word => {
-                // Check if the word is a column name (contains underscore)
-                if (word.includes('_')) {
-                    return formatColumnName(word);
-                }
-                return word;
-            })
-            .join('');
+    // Render data table with our enhanced DataTable component
+    const renderDataTable = (data) => {
+        if (!data || !Array.isArray(data) || data.length === 0) {
+            return null;
+        }
 
-        // Determine the table name to display (without user prefix)
-        const tableName = query.display_table_name ||
-            (query.table_name ? formatColumnName(query.table_name) : null);
+        // Create columns configuration for the DataTable
+        const columns = Object.keys(data[0]).map(key => ({
+            id: key,
+            header: formatColumnName(key),
+            accessor: key,
+            sortable: true
+        }));
+
+        // Determine appropriate page size options based on data size
+        const pageSizeOptions = (() => {
+            const dataLength = data.length;
+            if (dataLength <= 10) return [5, 10];
+            if (dataLength <= 25) return [5, 10, 25];
+            if (dataLength <= 50) return [10, 25, 50];
+            return [10, 25, 50, 100];
+        })();
 
         return (
-            <div style={{
-                backgroundColor: '#f8faff',
-                padding: '1rem',
-                borderRadius: '8px',
-                marginBottom: '1rem'
-            }}>
-                <div style={{ marginBottom: '0.5rem', color: '#666' }}>
-                    <strong>Results:</strong> {recordCount} {recordCount === 1 ? 'record' : 'records'}
-                    {tableName && (
-                        <span> from <strong>{tableName}</strong></span>
-                    )}
-                </div>
-                <div style={{ fontSize: '0.9rem', color: '#444' }}>
-                    <strong>Query:</strong> {formattedQuery}
-                </div>
+            <div className="w-full" onClick={(e) => e.stopPropagation()}>
+                <DataTable
+                    columns={columns}
+                    data={data}
+                    title="Data Results"
+                    compact={true}
+                    pageSizeOptions={pageSizeOptions}
+                    className="shadow-sm"
+                />
             </div>
         );
     };
 
-    return (
-        <div className="main-dashboard">
-            <div className="dashboard-top" style={{ width: '100%', maxWidth: '100%', padding: '1rem' }}>
-                <div className="query-input-card" style={{ maxWidth: '100%' }}>
-                    <div className="input-wrapper">
-                        <input
-                            type="text"
-                            value={userQuery}
-                            onChange={(e) => setUserQuery(e.target.value)}
-                            placeholder="Ask a question about your data..."
-                            className="query-input"
-                        />
-                        <button
-                            onClick={handleSubmit}
-                            disabled={isLoading || !userQuery.trim()}
-                            className="run-query-btn"
-                        >
-                            {isLoading ? 'Processing...' : 'Run Query'}
-                        </button>
+    // Format column name for display
+    const formatColumnName = (name) => {
+        if (!name || typeof name !== 'string') return '';
+        return name
+            .split('_')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+            .join(' ');
+    };
+
+    // Render chart based on data and type
+    const renderChart = (data, chartType = 'bar', isModal = false) => {
+        if (!data || !Array.isArray(data) || data.length === 0) return null;
+
+        const keys = Object.keys(data[0]);
+        if (keys.length < 2) return null;
+
+        const categoryKey = keys[0];
+        const valueKey = keys[1];
+
+        // Format values for display
+        const formatValue = (value) => new Intl.NumberFormat().format(value);
+
+        // Prepare chart data
+        const chartData = data.map(item => ({
+            name: String(item[categoryKey]),
+            value: Number(item[valueKey])
+        }));
+
+        // Custom tooltip styling
+        const CustomTooltip = ({ active, payload }) => {
+            if (active && payload && payload.length) {
+                return (
+                    <div className="custom-tooltip">
+                        <p className="tooltip-label">{`${payload[0].name}`}</p>
+                        <p className="tooltip-value">
+                            <span className="value-label">Value:</span>
+                            <span className="value-number">{formatValue(payload[0].value)}</span>
+                        </p>
                     </div>
+                );
+            }
+            return null;
+        };
 
-                    {error && <div className="error-message">{error}</div>}
+        // Custom legend that limits the number of items shown
+        const renderLegend = (props) => {
+            const { payload } = props;
+            const maxItems = isModal ? 10 : 5;
 
-                    <div className="example-queries-section">
-                        <p className="example-label">Example queries:</p>
-                        <div className="example-tags">
-                            {exampleQueries.map((query, index) => (
-                                <button
-                                    key={index}
-                                    className="example-tag"
-                                    onClick={() => handleExampleClick(query)}
+            // If we have too many items, show only a subset
+            const displayItems = payload.length > maxItems
+                ? [...payload.slice(0, maxItems - 1), { value: `+${payload.length - maxItems + 1} more` }]
+                : payload;
+
+            return (
+                <ul className="custom-legend">
+                    {displayItems.map((entry, index) => (
+                        <li key={`item-${index}`} className="legend-item">
+                            {index < maxItems - 1 || payload.length <= maxItems ? (
+                                <>
+                                    <span className="legend-color" style={{ backgroundColor: entry.color }} />
+                                    <span className="legend-text">{entry.value}</span>
+                                </>
+                            ) : (
+                                <span className="legend-more">{entry.value}</span>
+                            )}
+                        </li>
+                    ))}
+                </ul>
+            );
+        };
+
+        // Render appropriate chart based on type
+        switch (chartType) {
+            case 'pie':
+                return (
+                    <div className="chart-container-wrapper">
+                        <ResponsiveContainer width="100%" height={isModal ? 400 : 300}>
+                            <PieChart>
+                                <defs>
+                                    {COLORS.map((color, index) => (
+                                        <radialGradient key={`gradient-${index}`} id={`pieGradient${index}`} cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+                                            <stop offset="0%" stopColor={color} stopOpacity={0.9} />
+                                            <stop offset="100%" stopColor={color} stopOpacity={0.6} />
+                                        </radialGradient>
+                                    ))}
+                                </defs>
+                                <Pie
+                                    data={chartData}
+                                    cx="50%"
+                                    cy="50%"
+                                    labelLine={false}
+                                    outerRadius={isModal ? 140 : 100}
+                                    innerRadius={isModal ? 70 : 50}
+                                    fill="#8884d8"
+                                    dataKey="value"
+                                    nameKey="name"
+                                    label={({ name, percent }) =>
+                                        percent > 0.05 ? `${name}: ${(percent * 100).toFixed(0)}%` : ''}
+                                    animationBegin={0}
+                                    animationDuration={1200}
+                                    animationEasing="ease-out"
                                 >
-                                    "{query}"
-                                </button>
-                            ))}
+                                    {chartData.map((entry, index) => (
+                                        <Cell
+                                            key={`cell-${index}`}
+                                            fill={`url(#pieGradient${index % COLORS.length})`}
+                                            stroke={COLORS[index % COLORS.length]}
+                                            strokeWidth={1}
+                                        />
+                                    ))}
+                                </Pie>
+                                <Tooltip content={<CustomTooltip />} />
+                                <Legend
+                                    content={renderLegend}
+                                    layout="horizontal"
+                                    verticalAlign="bottom"
+                                    align="center"
+                                    wrapperStyle={{ paddingTop: '20px' }}
+                                />
+                            </PieChart>
+                        </ResponsiveContainer>
+                    </div>
+                );
+            case 'line':
+                return (
+                    <div className="chart-container-wrapper">
+                        <ResponsiveContainer width="100%" height={isModal ? 400 : 300}>
+                            <LineChart data={chartData}>
+                                <defs>
+                                    <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor={GRADIENT_COLORS.blue[0]} stopOpacity={0.8} />
+                                        <stop offset="95%" stopColor={GRADIENT_COLORS.blue[1]} stopOpacity={0.2} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#eaedf2" />
+                                <XAxis
+                                    dataKey="name"
+                                    tick={{ fill: '#5a6282', fontSize: 12 }}
+                                    axisLine={{ stroke: '#dbe0ea' }}
+                                    tickLine={{ stroke: '#dbe0ea' }}
+                                />
+                                <YAxis
+                                    tick={{ fill: '#5a6282', fontSize: 12 }}
+                                    axisLine={{ stroke: '#dbe0ea' }}
+                                    tickLine={{ stroke: '#dbe0ea' }}
+                                />
+                                <Tooltip content={<CustomTooltip />} />
+                                <Legend content={renderLegend} />
+                                <Line
+                                    type="monotone"
+                                    dataKey="value"
+                                    stroke={GRADIENT_COLORS.blue[0]}
+                                    strokeWidth={3}
+                                    activeDot={{ r: 8, fill: GRADIENT_COLORS.blue[0], stroke: '#fff', strokeWidth: 2 }}
+                                    dot={{ r: 4, fill: GRADIENT_COLORS.blue[0], stroke: '#fff', strokeWidth: 2 }}
+                                    animationBegin={0}
+                                    animationDuration={1500}
+                                    animationEasing="ease-out"
+                                />
+                            </LineChart>
+                        </ResponsiveContainer>
+                    </div>
+                );
+            case 'area':
+                return (
+                    <div className="chart-container-wrapper">
+                        <ResponsiveContainer width="100%" height={isModal ? 400 : 300}>
+                            <LineChart data={chartData}>
+                                <defs>
+                                    <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor={GRADIENT_COLORS.purple[0]} stopOpacity={0.8} />
+                                        <stop offset="95%" stopColor={GRADIENT_COLORS.purple[1]} stopOpacity={0.2} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#eaedf2" />
+                                <XAxis
+                                    dataKey="name"
+                                    tick={{ fill: '#5a6282', fontSize: 12 }}
+                                    axisLine={{ stroke: '#dbe0ea' }}
+                                    tickLine={{ stroke: '#dbe0ea' }}
+                                />
+                                <YAxis
+                                    tick={{ fill: '#5a6282', fontSize: 12 }}
+                                    axisLine={{ stroke: '#dbe0ea' }}
+                                    tickLine={{ stroke: '#dbe0ea' }}
+                                />
+                                <Tooltip content={<CustomTooltip />} />
+                                <Legend content={renderLegend} />
+                                <Line
+                                    type="monotone"
+                                    dataKey="value"
+                                    stroke={GRADIENT_COLORS.purple[0]}
+                                    strokeWidth={3}
+                                    fill="url(#areaGradient)"
+                                    fillOpacity={1}
+                                    activeDot={{ r: 8, fill: GRADIENT_COLORS.purple[0], stroke: '#fff', strokeWidth: 2 }}
+                                    dot={{ r: 4, fill: GRADIENT_COLORS.purple[0], stroke: '#fff', strokeWidth: 2 }}
+                                    animationBegin={0}
+                                    animationDuration={1500}
+                                    animationEasing="ease-out"
+                                />
+                            </LineChart>
+                        </ResponsiveContainer>
+                    </div>
+                );
+            case 'bar':
+            default:
+                return (
+                    <div className="chart-container-wrapper">
+                        <ResponsiveContainer width="100%" height={isModal ? 400 : 300}>
+                            <BarChart data={chartData}>
+                                <defs>
+                                    {COLORS.map((color, index) => (
+                                        <linearGradient key={`gradient-${index}`} id={`barGradient${index}`} x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor={color} stopOpacity={0.9} />
+                                            <stop offset="95%" stopColor={color} stopOpacity={0.6} />
+                                        </linearGradient>
+                                    ))}
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#eaedf2" vertical={false} />
+                                <XAxis
+                                    dataKey="name"
+                                    tick={{ fill: '#5a6282', fontSize: 12 }}
+                                    axisLine={{ stroke: '#dbe0ea' }}
+                                    tickLine={{ stroke: '#dbe0ea' }}
+                                />
+                                <YAxis
+                                    tick={{ fill: '#5a6282', fontSize: 12 }}
+                                    axisLine={{ stroke: '#dbe0ea' }}
+                                    tickLine={{ stroke: '#dbe0ea' }}
+                                />
+                                <Tooltip content={<CustomTooltip />} />
+                                <Legend content={renderLegend} />
+                                <Bar
+                                    dataKey="value"
+                                    radius={[4, 4, 0, 0]}
+                                    animationBegin={0}
+                                    animationDuration={1200}
+                                    animationEasing="ease-out"
+                                >
+                                    {chartData.map((entry, index) => (
+                                        <Cell
+                                            key={`cell-${index}`}
+                                            fill={`url(#barGradient${index % COLORS.length})`}
+                                        />
+                                    ))}
+                                </Bar>
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </div>
+                );
+        }
+    };
+
+    const handleQueryClick = (index) => {
+        setSelectedQueryIndex(index);
+        setModalOpen(true);
+    };
+
+    const closeModal = () => {
+        setModalOpen(false);
+        setSelectedQueryIndex(null);
+    };
+
+    return (
+        <div className="space-y-6">
+            {/* Query Input Section */}
+            <Card>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label htmlFor="userQuery" className="block text-sm font-medium text-gray-700 mb-1">
+                            Enter your query
+                        </label>
+                        <div className="flex gap-3">
+                            <input
+                                type="text"
+                                id="userQuery"
+                                value={userQuery}
+                                onChange={(e) => setUserQuery(e.target.value)}
+                                placeholder="What would you like to know about your data?"
+                                className="flex-1 px-3 py-2 bg-gray-50 border border-gray-300 rounded-md text-sm text-gray-900
+                                         focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500
+                                         disabled:bg-gray-100 disabled:text-gray-500"
+                                disabled={isLoading}
+                            />
+                            <Button
+                                type="submit"
+                                disabled={isLoading || !userQuery.trim()}
+                                variant="primary"
+                            >
+                                {isLoading ? 'Processing...' : 'Run Query'}
+                            </Button>
                         </div>
+                    </div>
+                </form>
+
+                {/* Example Queries */}
+                <div className="mt-4">
+                    <h3 className="text-sm font-medium text-gray-700 mb-2">Example queries:</h3>
+                    <div className="flex flex-wrap gap-2">
+                        {exampleQueries.map((query, index) => (
+                            <button
+                                key={index}
+                                onClick={() => handleExampleClick(query)}
+                                className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-gray-100 text-gray-700
+                                         hover:bg-gray-200 transition-colors duration-150 ease-in-out"
+                            >
+                                {query}
+                            </button>
+                        ))}
                     </div>
                 </div>
-            </div>
+            </Card>
 
-            <div className="dashboard-content">
-                {selectedQueries.length > 0 && (
-                    <div style={{
-                        padding: '1rem',
-                        backgroundColor: '#f8faff',
-                        borderBottom: '1px solid #e1e9ff',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center'
-                    }}>
-                        <div>
-                            <span style={{ fontWeight: 500 }}>
-                                {selectedQueries.length} {selectedQueries.length === 1 ? 'query' : 'queries'} selected
-                            </span>
+            {/* Error Message */}
+            {error && (
+                <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded">
+                    <p className="text-red-700">{error}</p>
+                </div>
+            )}
+
+            {/* Query Controls */}
+            {displayedQueries.length > 0 && (
+                <Card className="bg-white">
+                    <div className="flex flex-col sm:flex-row gap-4">
+                        <div className="flex-1 min-w-0">
+                            <input
+                                type="text"
+                                placeholder="Search queries..."
+                                value={queryFilter}
+                                onChange={(e) => setQueryFilter(e.target.value)}
+                                className="w-full px-4 py-2.5 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-900
+                                         focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500
+                                         placeholder-gray-500"
+                            />
                         </div>
-                        <button
-                            onClick={() => setShowAnalysisForm(true)}
-                            style={{
-                                backgroundColor: '#1a73e8',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '4px',
-                                padding: '0.5rem 1rem',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.5rem'
-                            }}
-                        >
-                            <span>Analyze Selected Queries</span>
-                        </button>
+                        <div className="flex gap-3 w-full sm:w-auto">
+                            <select
+                                value={sortOrder}
+                                onChange={(e) => setSortOrder(e.target.value)}
+                                className="w-full sm:w-auto px-4 py-2.5 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-900
+                                         focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500
+                                         cursor-pointer"
+                            >
+                                <option value="newest">Newest First</option>
+                                <option value="oldest">Oldest First</option>
+                                <option value="records">Most Records</option>
+                            </select>
+                            <select
+                                value={activeTab}
+                                onChange={(e) => setActiveTab(e.target.value)}
+                                className="w-full sm:w-auto px-4 py-2.5 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-900
+                                         focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500
+                                         cursor-pointer"
+                            >
+                                <option value="all">All Queries</option>
+                                <option value="chartable">Charts Only</option>
+                                <option value="tables">Tables Only</option>
+                            </select>
+                        </div>
                     </div>
-                )}
+                </Card>
+            )}
 
-                {showAnalysisForm && (
-                    <AnalysisForm
-                        queryIds={selectedQueries}
-                        onClose={() => setShowAnalysisForm(false)}
-                        onAnalysisComplete={(results) => {
-                            if (onQuerySaved) onQuerySaved({ type: 'analysis', results });
-                            setShowAnalysisForm(false);
-                        }}
-                    />
-                )}
+            {/* Analysis Form */}
+            {showAnalysisForm && (
+                <AnalysisForm
+                    queryIds={selectedQueries}
+                    onClose={() => setShowAnalysisForm(false)}
+                    onAnalysisComplete={(results) => {
+                        if (onQuerySaved) onQuerySaved({ type: 'analysis', results });
+                        setShowAnalysisForm(false);
+                    }}
+                />
+            )}
 
-                <div className="dashboard-main">
-                    <div className="results-grid" style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(2, 1fr)',
-                        gap: '1.5rem',
-                        width: '100%',
-                        maxWidth: '100%',
-                        padding: '0 1rem'
-                    }}>
-                        {isLoading && displayedQueries.length === 0 ? (
-                            <div className="loading-container">
-                                <div className="loading-spinner"></div>
-                                <p>Loading your queries...</p>
+            {/* Query Results */}
+            {displayedQueries.length > 0 && (
+                <div className="space-y-6">
+                    <div className="flex justify-between items-center bg-white p-4 rounded-lg border border-gray-200">
+                        <h2 className="text-xl font-semibold text-gray-800">Query Results</h2>
+                        {selectedQueries.length > 0 && (
+                            <div className="flex items-center gap-4">
+                                <span className="text-sm font-medium text-gray-600">
+                                    {selectedQueries.length} {selectedQueries.length === 1 ? 'query' : 'queries'} selected
+                                </span>
+                                <Button
+                                    onClick={() => setShowAnalysisForm(true)}
+                                    variant="primary"
+                                    size="sm"
+                                >
+                                    Analyze Selected
+                                </Button>
                             </div>
-                        ) : displayedQueries.length === 0 ? (
-                            <div className="no-queries-message">
-                                <p>No queries to display</p>
-                                <p className="hint-text">Enter a new query or try one of the example queries above</p>
-                            </div>
+                        )}
+                    </div>
+
+                    {/* Query Results Grid */}
+                    <div className="grid grid-cols-1 gap-6">
+                        {isLoading && filteredAndSortedQueries.length === 0 ? (
+                            <Card className="py-12 bg-white">
+                                <div className="flex flex-col items-center justify-center">
+                                    <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                                    <p className="text-gray-600 font-medium">Loading your queries...</p>
+                                </div>
+                            </Card>
+                        ) : filteredAndSortedQueries.length === 0 ? (
+                            <Card className="py-12 bg-white">
+                                <div className="text-center">
+                                    <p className="text-lg font-medium text-gray-800 mb-2">No queries to display</p>
+                                    <p className="text-gray-600">
+                                        {queryFilter ?
+                                            'Try adjusting your search terms or filters.' :
+                                            'Enter a new query or try one of the example queries above.'}
+                                    </p>
+                                </div>
+                            </Card>
                         ) : (
-                            displayedQueries.map((query, index) => {
-                                console.log("Rendering query result:", query); // Debug log
-                                // Look for query text in multiple possible locations including nested query object
+                            filteredAndSortedQueries.map((query, index) => {
+                                // Look for query text in multiple possible locations
                                 const queryText =
                                     query.original_query ||
                                     (query.query && query.query.original_query) ||
@@ -1030,214 +808,288 @@ const QueryForm = ({ onQuerySaved }) => {
                                     query.text ||
                                     query.question ||
                                     (query.details && query.details.query);
+
+                                // Format the query text for display
+                                const formattedQueryText = queryText ?
+                                    queryText.length > 80 ?
+                                        queryText.substring(0, 77) + '...' :
+                                        queryText :
+                                    "No query text available";
+
+                                // Get record count
+                                const recordCount = query.filtered_data ? query.filtered_data.length : 0;
+
+                                // Determine the table name to display (without user prefix)
+                                const tableName = query.display_table_name ||
+                                    (query.table_name ? formatColumnName(query.table_name) : null);
+
+                                // Format timestamp if available
+                                const timestamp = query.timestamp || query.created_at || null;
+                                const formattedDate = timestamp ? new Date(timestamp).toLocaleString() : null;
+
+                                // Use the query ID to determine if this is the one pending deletion
+                                const queryId = query.id || query.query_id;
+                                const isPendingDelete = pendingDeleteIndex === index;
+
                                 return (
-                                    <div className="result-card" key={index} style={{
-                                        marginBottom: '1rem',
-                                        boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        minHeight: '400px',
-                                        maxHeight: '600px',
-                                        width: '100%',
-                                        backgroundColor: '#ffffff',
-                                        borderRadius: '8px',
-                                        border: '1px solid #e1e9ff'
-                                    }}>
-                                        <div className="result-header" style={{
-                                            padding: '0.5rem 0.75rem',
-                                            backgroundColor: '#f8faff',
-                                            borderBottom: '1px solid #e1e9ff',
-                                            display: 'flex',
-                                            justifyContent: 'space-between',
-                                            alignItems: 'center'
-                                        }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={selectedQueries.includes(query.id || query.query_id)}
-                                                    onChange={(e) => {
-                                                        const queryId = query.id || query.query_id;
-                                                        if (e.target.checked) {
-                                                            setSelectedQueries([...selectedQueries, queryId]);
-                                                        } else {
-                                                            setSelectedQueries(selectedQueries.filter(id => id !== queryId));
-                                                        }
-                                                    }}
-                                                    style={{
-                                                        width: '16px',
-                                                        height: '16px',
-                                                        cursor: 'pointer'
-                                                    }}
-                                                />
-                                                <h3 style={{
-                                                    color: '#1a73e8',
-                                                    fontSize: '0.85rem',
-                                                    fontWeight: 'bold',
-                                                    margin: '0',
-                                                    padding: '0.25rem 0',
-                                                    whiteSpace: 'nowrap',
-                                                    overflow: 'hidden',
-                                                    textOverflow: 'ellipsis',
-                                                    maxWidth: '250px'
-                                                }}>
-                                                    Query: {queryText ? `"${queryText}"` : "No query text available"}
-                                                </h3>
-                                            </div>
-                                            <div className="result-actions" style={{
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '0.5rem'
-                                            }}>
-                                                {isChartable(query.filtered_data) && (
-                                                    <select
-                                                        value={query.preferredChartType || (query.chart_data ? query.chart_data.type : 'bar')}
-                                                        onChange={(e) => handleChangeChartType(index, e.target.value)}
-                                                        className="chart-type-select"
-                                                        style={{ fontSize: '0.85rem', padding: '0.15rem' }}
-                                                    >
-                                                        <option value="bar">Bar Chart</option>
-                                                        <option value="pie">Pie Chart</option>
-                                                        <option value="line">Line Chart</option>
-                                                    </select>
-                                                )}
-                                                <button
-                                                    className="close-result"
-                                                    onClick={() => setPendingDeleteIndex(index)}
-                                                    style={{
-                                                        fontSize: '1rem',
-                                                        padding: '0 0.25rem',
-                                                        display: 'block',
-                                                        marginLeft: '0.5rem',
-                                                        backgroundColor: '#f5f5f5',
-                                                        border: '1px solid #ddd',
-                                                        borderRadius: '4px',
-                                                        width: '24px',
-                                                        height: '24px',
-                                                        lineHeight: '1',
-                                                        cursor: 'pointer'
-                                                    }}
-                                                >
-                                                    &times;
-                                                </button>
+                                    <Card
+                                        key={index}
+                                        className="overflow-hidden transition-all duration-200 hover:shadow-md bg-white"
+                                    >
+                                        <div className="border-b border-gray-100 bg-white">
+                                            <div className="p-4">
+                                                <div className="flex justify-between items-start gap-4">
+                                                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                                                        <div className="pt-1">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={selectedQueries.includes(queryId)}
+                                                                onChange={(e) => {
+                                                                    e.stopPropagation();
+                                                                    if (e.target.checked) {
+                                                                        setSelectedQueries([...selectedQueries, queryId]);
+                                                                    } else {
+                                                                        setSelectedQueries(selectedQueries.filter(id => id !== queryId));
+                                                                    }
+                                                                }}
+                                                                className="h-4 w-4 text-indigo-600 border-gray-300 rounded
+                                                                         focus:ring-indigo-500 cursor-pointer focus:ring-offset-white"
+                                                            />
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <h3
+                                                                title={queryText}
+                                                                className="text-lg font-medium text-gray-900 truncate hover:text-indigo-600
+                                                                         cursor-pointer transition-colors duration-150"
+                                                                onClick={() => handleQueryClick(index)}
+                                                            >
+                                                                {formattedQueryText}
+                                                            </h3>
+                                                            <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+                                                                {recordCount > 0 && (
+                                                                    <span className="inline-flex items-center text-sm font-medium text-indigo-600">
+                                                                        <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                                                        </svg>
+                                                                        {recordCount} {recordCount === 1 ? 'record' : 'records'}
+                                                                    </span>
+                                                                )}
+                                                                {tableName && (
+                                                                    <span className="inline-flex items-center text-sm text-gray-600">
+                                                                        <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 7v10c0 2 1.5 3 3 3h10c1.5 0 3-1 3-3V7c0-2-1.5-3-3-3H7C5.5 4 4 5 4 7z" />
+                                                                        </svg>
+                                                                        {tableName}
+                                                                    </span>
+                                                                )}
+                                                                {formattedDate && (
+                                                                    <span className="inline-flex items-center text-sm text-gray-500">
+                                                                        <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                                        </svg>
+                                                                        {formattedDate}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2 flex-shrink-0">
+                                                        {isChartable(query.filtered_data) && (
+                                                            <select
+                                                                value={query.preferredChartType || (query.chart_data ? query.chart_data.type : 'bar')}
+                                                                onChange={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleChangeChartType(index, e.target.value);
+                                                                }}
+                                                                className="px-3 py-1.5 bg-gray-50 border border-gray-300 rounded-md text-sm
+                                                                         focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500
+                                                                         cursor-pointer"
+                                                            >
+                                                                <option value="bar">Bar Chart</option>
+                                                                <option value="pie">Pie Chart</option>
+                                                                <option value="line">Line Chart</option>
+                                                                <option value="area">Area Chart</option>
+                                                            </select>
+                                                        )}
+                                                        <button
+                                                            className="p-1.5 text-gray-400 hover:text-gray-600 rounded-full
+                                                                     hover:bg-gray-50 transition-colors duration-150"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setPendingDeleteIndex(index);
+                                                            }}
+                                                            aria-label="Delete query"
+                                                        >
+                                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                            </svg>
+                                                        </button>
+                                                    </div>
+                                                </div>
                                             </div>
                                         </div>
 
-                                        {pendingDeleteIndex === index && (
-                                            <div style={{
-                                                backgroundColor: '#fef8f8',
-                                                padding: '0.75rem',
-                                                borderTop: '1px solid #ffcdd2',
-                                                display: 'flex',
-                                                justifyContent: 'space-between',
-                                                alignItems: 'center'
-                                            }}>
-                                                <p style={{
-                                                    margin: 0,
-                                                    fontSize: '0.9rem',
-                                                    color: '#d32f2f'
-                                                }}>
-                                                    Delete this query permanently?
-                                                </p>
-                                                <div>
-                                                    <button
-                                                        onClick={() => handleCloseQuery(index)}
-                                                        style={{
-                                                            backgroundColor: '#d32f2f',
-                                                            color: 'white',
-                                                            border: 'none',
-                                                            borderRadius: '4px',
-                                                            padding: '0.4rem 0.75rem',
-                                                            marginRight: '0.5rem',
-                                                            fontSize: '0.85rem'
-                                                        }}
-                                                    >
-                                                        Delete
-                                                    </button>
-                                                    <button
-                                                        onClick={() => setPendingDeleteIndex(null)}
-                                                        style={{
-                                                            backgroundColor: '#f5f5f5',
-                                                            color: '#333',
-                                                            border: '1px solid #ddd',
-                                                            borderRadius: '4px',
-                                                            padding: '0.4rem 0.75rem',
-                                                            fontSize: '0.85rem'
-                                                        }}
-                                                    >
-                                                        Cancel
-                                                    </button>
+                                        {isPendingDelete && (
+                                            <div
+                                                className="absolute inset-0 bg-white bg-opacity-90 backdrop-blur-sm flex items-center justify-center rounded-lg z-10"
+                                                onClick={(e) => e.stopPropagation()}
+                                            >
+                                                <div className="bg-white p-6 rounded-lg shadow-lg max-w-sm w-full mx-4 border border-gray-200">
+                                                    <p className="text-gray-700 mb-4 text-center">Delete this query permanently?</p>
+                                                    <div className="flex justify-center gap-4">
+                                                        <Button
+                                                            variant="error"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleCloseQuery(index);
+                                                            }}
+                                                        >
+                                                            Delete
+                                                        </Button>
+                                                        <Button
+                                                            variant="outline"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setPendingDeleteIndex(null);
+                                                            }}
+                                                        >
+                                                            Cancel
+                                                        </Button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         )}
 
-                                        <div className="result-content" style={{
-                                            padding: '0.5rem 0.75rem',
-                                            flex: 1,
-                                            overflow: 'auto'
-                                        }}>
-                                            {query.filtered_data && query.filtered_data.length > 0 ? (
-                                                <div className="result-data-container" style={{ gap: '0.5rem' }}>
-                                                    {isChartable(query.filtered_data) && (
-                                                        <div className="chart-container" style={{
-                                                            padding: '0.75rem',
-                                                            height: query.filtered_data.length > 8 ? '300px' : '250px',
-                                                            backgroundColor: '#f9fafc',
-                                                            borderRadius: '6px',
-                                                            boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.05)',
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            justifyContent: 'center',
-                                                            marginBottom: '1rem'
-                                                        }}>
-                                                            {renderChart(query.filtered_data, query.preferredChartType || 'bar')}
-                                                        </div>
+                                        <div className="p-4">
+                                            {/* Chart section if data is chartable */}
+                                            {isChartable(query.filtered_data) && (
+                                                <div className="mb-6" onClick={(e) => e.stopPropagation()}>
+                                                    {renderChart(
+                                                        query.filtered_data,
+                                                        query.preferredChartType || (query.chart_data ? query.chart_data.type : 'bar')
                                                     )}
-
-                                                    <div style={{
-                                                        backgroundColor: '#f0f7ff',
-                                                        borderRadius: '6px',
-                                                        padding: '0.75rem 1rem',
-                                                        margin: '0.5rem 0',
-                                                        borderLeft: '4px solid #4285f4'
-                                                    }}>
-                                                        <h4 style={{
-                                                            margin: '0 0 0.25rem 0',
-                                                            color: '#4285f4',
-                                                            fontSize: '1rem'
-                                                        }}>Summary</h4>
-
-                                                        {/* Display API answer if available */}
-                                                        {query.answer && (
-                                                            <p style={{
-                                                                margin: '0.25rem 0',
-                                                                fontSize: '0.95rem',
-                                                                lineHeight: '1.4',
-                                                                color: '#000',
-                                                                fontWeight: '500',
-                                                                backgroundColor: '#e8f0fe',
-                                                                padding: '0.4rem 0.5rem',
-                                                                borderRadius: '4px'
-                                                            }}>
-                                                                {query.answer}
-                                                            </p>
-                                                        )}
-
-                                                        {renderSummary(query)}
-                                                    </div>
-
-                                                    {renderDataTable(query.filtered_data)}
                                                 </div>
-                                            ) : (
-                                                <p className="no-data">No data available for this query</p>
+                                            )}
+
+                                            {/* Data table section */}
+                                            {query.filtered_data && query.filtered_data.length > 0 && (
+                                                renderDataTable(query.filtered_data)
                                             )}
                                         </div>
-                                    </div>
+                                    </Card>
                                 );
                             })
                         )}
                     </div>
                 </div>
-            </div>
+            )}
+
+            {/* Query Modal */}
+            {modalOpen && selectedQuery && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={closeModal}>
+                    <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex justify-between items-center p-6 border-b border-gray-200">
+                            <h2 className="text-xl font-bold text-gray-800 pr-8">{selectedQuery.original_query}</h2>
+                            <button
+                                className="text-gray-400 hover:text-gray-600"
+                                onClick={closeModal}
+                                aria-label="Close modal"
+                            >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div className="p-6">
+                            <div className="flex flex-wrap gap-6 mb-6 text-sm">
+                                {selectedQuery.filtered_data && (
+                                    <div className="flex items-center">
+                                        <span className="text-gray-600 mr-2">Records:</span>
+                                        <span className="font-medium">{selectedQuery.filtered_data.length}</span>
+                                    </div>
+                                )}
+
+                                {(selectedQuery.display_table_name || selectedQuery.table_name) && (
+                                    <div className="flex items-center">
+                                        <span className="text-gray-600 mr-2">Table:</span>
+                                        <span className="font-medium">{selectedQuery.display_table_name || selectedQuery.table_name}</span>
+                                    </div>
+                                )}
+
+                                {(selectedQuery.timestamp || selectedQuery.created_at) && (
+                                    <div className="flex items-center">
+                                        <span className="text-gray-600 mr-2">Date:</span>
+                                        <span className="font-medium">{new Date(selectedQuery.timestamp || selectedQuery.created_at).toLocaleString()}</span>
+                                    </div>
+                                )}
+                            </div>
+
+                            {selectedQuery.sql_query && (
+                                <div className="mb-6">
+                                    <details open>
+                                        <summary className="text-primary hover:underline cursor-pointer mb-2">SQL Query</summary>
+                                        <pre className="p-4 bg-gray-800 text-white text-sm rounded-md overflow-x-auto">{selectedQuery.sql_query}</pre>
+                                    </details>
+                                </div>
+                            )}
+
+                            {isChartable(selectedQuery.filtered_data) && (
+                                <div className="mb-6">
+                                    <div className="h-80 mb-4">
+                                        {renderChart(
+                                            selectedQuery.filtered_data,
+                                            selectedQuery.preferredChartType || (selectedQuery.chart_data ? selectedQuery.chart_data.type : 'bar'),
+                                            true // isModal = true for larger chart
+                                        )}
+                                    </div>
+
+                                    <div className="flex flex-col sm:flex-row items-center gap-2 mb-4">
+                                        <span className="text-gray-600 font-medium">Chart Type:</span>
+                                        <div className="flex flex-wrap gap-2">
+                                            {['bar', 'pie', 'line', 'area'].map(type => (
+                                                <button
+                                                    key={type}
+                                                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${(selectedQuery.preferredChartType || 'bar') === type
+                                                        ? 'bg-primary text-white'
+                                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                                        }`}
+                                                    onClick={() => handleChangeChartType(selectedQueryIndex, type)}
+                                                >
+                                                    {type.charAt(0).toUpperCase() + type.slice(1)}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {selectedQuery.filtered_data && selectedQuery.filtered_data.length > 0 && (
+                                <div className="mb-6">
+                                    {renderDataTable(selectedQuery.filtered_data)}
+                                </div>
+                            )}
+
+                            <div className="flex justify-end gap-3 mt-6">
+                                <Button
+                                    variant="outline"
+                                    onClick={closeModal}
+                                >
+                                    Close
+                                </Button>
+                                <Button
+                                    onClick={() => {
+                                        // Implement export functionality
+                                        closeModal();
+                                    }}
+                                >
+                                    Export Results
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

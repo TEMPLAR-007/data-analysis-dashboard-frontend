@@ -1,7 +1,7 @@
 // API service for backend communication
 import { auth } from './auth';
 
-const API_BASE_URL = 'https://api.gaszip.app/api';
+const API_BASE_URL = 'http://localhost:3000/api';
 
 export const api = {
     BASE_URL: API_BASE_URL,
